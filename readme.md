@@ -4,6 +4,11 @@ Baselines for the VLSP ViSpatialQA task (Vietnamese SPARTQA): a shared XLNet
 encoder with task-specific heads and a GPT-4.1-mini API experiment using a
 spatial reasoning prompt. Both support YN, FR, FB, and CO questions.
 
+The API runner also supports **Path-of-Thoughts v2 for YN, FR, FB and CO**, with graph
+extraction, multi-pair path search, joint evidence reasoning, and a fixed-graph
+no-path ablation. See [Docs/path_of_thoughts.md](Docs/path_of_thoughts.md) for the
+paper mapping, commands, limitations, and live pilot results.
+
 ## Repository Layout
 
 ```text
@@ -11,6 +16,7 @@ spartqa/
   data.py                 JSON I/O, answer labels, validation, API input records
   metrics.py              Accuracy, exact-match, and Jaccard scoring
   api.py                  Structured requests and sanitized API response handling
+  pot.py                  All-task graph extraction, path search, and joint reasoning
 gpt_experiment.py         API experiment CLI, cache, exports, and configuration
 XLNER.py                  XLNet training/evaluation/prediction CLI
 test_gpt_experiment.py    Mocked API and resume tests
@@ -18,6 +24,8 @@ test_spartqa.py           Shared utilities and Git publication tests
 Docs/
   spartqa_cot.txt          Versioned default prompt
   gpt_experiment.md        API experiment options and output details
+  path_of_thoughts.md      PoT adaptation, controlled ablation, and pilot report
+  spartqa_pot_extract.txt  Structured spatial graph extraction prompt
   task_description.md     Original task description
 Data/                     Organizer-provided JSON files (local only)
 outputs/                  Results and checkpoints (local only)
@@ -73,6 +81,19 @@ responses are cached, so they are not requested again. Failed requests can be
 retried. Use a new output directory when changing the prompt, endpoint, model,
 generation settings, or dataset. CLI names and existing cache configuration
 version 2 remain compatible with runs made before the shared-module refactor.
+
+To run PoT on all question types in the public test file:
+
+```powershell
+python gpt_experiment.py --method pot --input Data/human_public_test.json --dry-run
+python gpt_experiment.py --method pot --input Data/human_public_test.json --max-paths 4 --max-output-tokens 2048 --output-dir outputs/pot_v2_human_public_test
+```
+
+Use a new output directory for PoT v2; old FR-only PoT caches are incompatible.
+The extraction prompt tracks object membership, repeated mentions and named
+block boundaries. PoT v2 uses one extraction and one joint reasoning call per
+question, not a union of per-path FR answers. Its accuracy has not yet been
+measured with live API calls; historical pilot results describe v1 only.
 
 Requests send stories and questions to the configured service and may incur
 charges. Gold answers and reasoning metadata are excluded from requests.

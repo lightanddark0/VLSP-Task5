@@ -4,6 +4,13 @@ This is zero-shot API evaluation on Human train, not fine-tuning and not a
 held-out benchmark result. Gold answers are used locally for scoring only.
 The validation split task is separate; this script does not alter any data splits.
 
+This describes the default `--method cot` run. For the all-task
+`--method pot` and `--method pot-no-path` experiments, graph-stage caching,
+controlled ablations, and observed results, see
+[path_of_thoughts.md](path_of_thoughts.md). All methods default to YN, FR, FB and
+CO. Use `--tasks FR` on both methods for a matched FR-only comparison before
+applying `--max-questions`.
+
 ## Run
 
 Install only the API dependency; PyTorch and a GPU are not needed:
@@ -95,7 +102,9 @@ Default directory: `outputs/gpt41mini_cot_human_train/`.
   removed and successful predictions inserted. Unanswered questions have no
   answer field, so a partial run must not be treated as a complete submission.
 - `metrics.json`: YN/CO accuracy, FR/FB exact match and mean per-question
-  Jaccard, counts, coverage, run status, and recorded token usage.
+  Jaccard, supplementary FR hit accuracy, counts, coverage, run status, and
+  recorded token usage. Hit accuracy means at least one predicted label is gold;
+  it does not penalize extra labels and must not replace exact match/Jaccard.
 
 For the selected questions, missing/invalid predictions count as incorrect and
 receive Jaccard 0. Valid empty FB prediction and gold sets receive Jaccard 1.
