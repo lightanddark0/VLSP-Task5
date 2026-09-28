@@ -1,7 +1,8 @@
 """Build JSONL training data for branch F (Qwen3 + LoRA).
 
-Stage 1 (Auto): a type-balanced sample of Auto train questions.
-    python prepare_sft.py --stage auto --n-samples 50000 --output-dir outputs/sft/auto
+Stage 1 (Auto): every Auto train question (default), or a type-balanced sample.
+    python prepare_sft.py --stage auto --output-dir outputs/sft/auto
+    python prepare_sft.py --stage auto --n-samples 50000 --output-dir outputs/sft/auto_50k
 Stage 2 (Human): every Human train question (optionally repeated) plus some
 Auto questions so the model does not forget Auto.
     python prepare_sft.py --stage human --auto-mix 2000 --output-dir outputs/sft/human
@@ -73,7 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--stage", choices=("auto", "human"), required=True)
     parser.add_argument("--splits-dir", type=Path, default=Path("Data/splits"))
-    parser.add_argument("--n-samples", type=int, default=50000, help="Auto questions for stage auto.")
+    parser.add_argument("--n-samples", type=int, default=0,
+                        help="Auto questions for stage auto; 0 (default) = all, else a type-balanced sample.")
     parser.add_argument("--type-ratio", type=parse_ratio, default=parse_ratio("YN=0.25,FR=0.30,FB=0.25,CO=0.20"))
     parser.add_argument("--human-repeat", type=int, default=1, help="Copies of each Human question (stage human).")
     parser.add_argument("--auto-mix", type=int, default=2000, help="Auto questions mixed into stage human.")
@@ -87,7 +89,8 @@ def main(argv: list[str] | None = None) -> int:
     auto_train = records_from(args.splits_dir / "auto_train.json", "auto")
     auto_dev = records_from(args.splits_dir / "auto_dev.json", "auto")
     if args.stage == "auto":
-        train = balanced_sample(auto_train, args.n_samples, args.type_ratio, rng)
+        train = balanced_sample(auto_train, args.n_samples, args.type_ratio, rng) if args.n_samples > 0 \
+            else list(auto_train)
         dev = balanced_sample(auto_dev, args.dev_samples, args.type_ratio, rng)
     else:
         human_train = records_from(args.splits_dir / "human_train.json", "human")

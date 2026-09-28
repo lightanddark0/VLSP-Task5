@@ -75,19 +75,37 @@ def tokenize_records(tokenizer: Any, path: str, max_len: int, limit: int | None)
 
 
 class Collator:
-    def __init__(self, pad_token_id: int) -> None:
+    """Left-pads a batch so every answer ends at the last position.
+
+    With ``answer_only_logits`` the batch also carries ``logits_to_keep`` = K
+    (longest answer + 1) and labels cut to the last K positions, so the model
+    computes the 152k-vocabulary logits only there instead of at every prompt
+    token: much less memory, a little less compute, identical loss. Explicit
+    position_ids start at 0 for each sequence, as at inference.
+    """
+
+    def __init__(self, pad_token_id: int, answer_only_logits: bool = True) -> None:
         self.pad_token_id = pad_token_id
+        self.answer_only_logits = answer_only_logits
 
     def __call__(self, features: list[dict[str, list[int]]]) -> dict[str, Any]:
         import torch
         width = max(len(feature["input_ids"]) for feature in features)
-        batch: dict[str, list[list[int]]] = {"input_ids": [], "attention_mask": [], "labels": []}
+        batch: dict[str, list[list[int]]] = {"input_ids": [], "attention_mask": [], "labels": [], "position_ids": []}
         for feature in features:
-            padding = width - len(feature["input_ids"])
-            batch["input_ids"].append(list(feature["input_ids"]) + [self.pad_token_id] * padding)
-            batch["attention_mask"].append([1] * len(feature["input_ids"]) + [0] * padding)
-            batch["labels"].append(list(feature["labels"]) + [-100] * padding)
-        return {key: torch.tensor(value) for key, value in batch.items()}
+            length = len(feature["input_ids"])
+            padding = width - length
+            batch["input_ids"].append([self.pad_token_id] * padding + list(feature["input_ids"]))
+            batch["attention_mask"].append([0] * padding + [1] * length)
+            batch["labels"].append([-100] * padding + list(feature["labels"]))
+            batch["position_ids"].append([0] * padding + list(range(length)))
+        tensors: dict[str, Any] = {key: torch.tensor(value) for key, value in batch.items()}
+        if self.answer_only_logits:
+            answer = max(sum(label != -100 for label in feature["labels"]) for feature in features)
+            keep = min(width, answer + 1)
+            tensors["labels"] = tensors["labels"][:, -keep:]
+            tensors["logits_to_keep"] = keep
+        return tensors
 
 
 def supported_kwargs(cls: Any, values: dict[str, Any]) -> dict[str, Any]:
@@ -164,6 +182,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--save-steps", type=int, default=300)
     parser.add_argument("--logging-steps", type=int, default=20)
     parser.add_argument("--attn-implementation", default="sdpa")
+    parser.add_argument("--answer-only-logits", action=argparse.BooleanOptionalAction, default=True,
+                        help="Compute vocabulary logits only at answer positions (same loss, less VRAM).")
     parser.add_argument("--gradient-checkpointing", action=argparse.BooleanOptionalAction, default=True,
                         help="Recompute activations to save VRAM (about 30%% slower). With group_by_length "
                              "the longest batch runs first, so an out-of-memory error shows at step 1.")
@@ -233,6 +253,10 @@ def main(argv: list[str] | None = None) -> int:
     tracking.update_config({"trainable_params": trainable, "total_params": total})
 
     has_eval = dev_set is not None and len(dev_set) > 0
+    base_forward = model.get_base_model().forward if hasattr(model, "get_base_model") else model.forward
+    answer_only_logits = args.answer_only_logits and "logits_to_keep" in inspect.signature(base_forward).parameters
+    if args.answer_only_logits and not answer_only_logits:
+        print("This transformers version has no logits_to_keep; computing logits at every position.")
     steps_per_epoch = max(1, -(-len(train_set) // effective_batch))
     total_steps = args.max_steps if args.max_steps > 0 else int(steps_per_epoch * args.epochs + 0.999)
     warmup_steps = int(total_steps * args.warmup_ratio + 0.999)
@@ -248,18 +272,23 @@ def main(argv: list[str] | None = None) -> int:
         "greater_is_better": False, "bf16": True, "gradient_checkpointing": args.gradient_checkpointing,
         "gradient_checkpointing_kwargs": {"use_reentrant": False} if args.gradient_checkpointing else None,
         "group_by_length": True,
-        "remove_unused_columns": False, "dataloader_num_workers": 2, "seed": args.seed, "data_seed": args.seed,
+        "remove_unused_columns": False, "prediction_loss_only": True, "label_names": ["labels"],
+        "dataloader_num_workers": 2, "seed": args.seed, "data_seed": args.seed,
         "report_to": ["wandb"] if tracking.active() else "none", "run_name": name,
         "push_to_hub": False,
     }
     training_args = TrainingArguments(**supported_kwargs(TrainingArguments, values))
     trainer_kwargs = {"model": model, "args": training_args, "train_dataset": train_set,
                       "eval_dataset": dev_set if has_eval else None,
-                      "data_collator": Collator(tokenizer.pad_token_id),
+                      "data_collator": Collator(tokenizer.pad_token_id, answer_only_logits),
                       "callbacks": [build_callback(train_tokens / steps_per_epoch)]}
     trainer_kwargs["processing_class" if "processing_class" in inspect.signature(Trainer.__init__).parameters
                    else "tokenizer"] = tokenizer
     trainer = Trainer(**trainer_kwargs)
+    # Lets a rerun (e.g. after a disconnect) resume with the same batch shape.
+    write_json(args.output_dir / "train_shape.json", {
+        "batch_size": args.batch_size, "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "gradient_checkpointing": args.gradient_checkpointing})
 
     torch.cuda.reset_peak_memory_stats() if torch.cuda.is_available() else None
     with tracking.timer("train"):

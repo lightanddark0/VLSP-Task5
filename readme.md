@@ -182,7 +182,7 @@ and `GITHUB_TOKEN`. Put the four data files in the Drive folder `DRIVE_DATA_DIR`
 | Step | Script | Output |
 | --- | --- | --- |
 | Statistics and checks | `explore.py` | `outputs/explore/report.json` |
-| F stage 1 (Auto 50k, 1 epoch) | `prepare_sft.py`, `train_lora.py` | adapter on the Hub |
+| F stage 1 (all Auto train, 1 epoch) | `prepare_sft.py`, `train_lora.py` | adapter on the Hub |
 | F1 inference, backup submission | `infer_f.py`, `ensemble.py --only F1` | `outputs/submission_backup/` |
 | F stage 2 (Human + 2k Auto) | `prepare_sft.py`, `train_lora.py --init-adapter` | adapter on the Hub |
 | L-CoT for Human (n=8) | `llm_cot.py` | vote shares per label |
