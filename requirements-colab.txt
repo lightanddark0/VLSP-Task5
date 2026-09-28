@@ -1,0 +1,9 @@
+# Colab H100 pipeline (run_colab.ipynb). Install vllm first: it pins a compatible
+# torch and transformers. Then the rest. After a working run, the notebook
+# saves `pip freeze` to requirements.lock.txt on the Hub for exact reinstalls.
+vllm
+peft
+datasets
+accelerate
+huggingface_hub
+wandb

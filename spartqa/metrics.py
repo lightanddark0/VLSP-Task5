@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Any, Iterable
 
 from spartqa.data import TASKS, validate_answer
@@ -139,3 +139,37 @@ def final_scores(human: dict[str, Any], auto: dict[str, Any]) -> dict[str, Any]:
         "by_task": by_task,
         "primary_macro_unofficial": (human["primary_macro_unofficial"] + auto["primary_macro_unofficial"]) / 2,
     }
+
+
+def detailed_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Error-analysis numbers: FR per-label P/R/F1 and set sizes, FB EM by empty gold, YN/CO confusion."""
+    details: dict[str, Any] = {}
+    fr = [record for record in records if record["task"] == "FR"]
+    if fr:
+        per_label = {}
+        for label in range(8):
+            true_positive = sum(label in (r["prediction"] or []) and label in r["gold"] for r in fr)
+            predicted = sum(label in (r["prediction"] or []) for r in fr)
+            actual = sum(label in r["gold"] for r in fr)
+            precision = true_positive / predicted if predicted else 0.0
+            recall = true_positive / actual if actual else 0.0
+            f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+            per_label[str(label)] = {"precision": precision, "recall": recall, "f1": f1, "support": actual}
+        details["FR"] = {
+            "per_label": per_label,
+            "pred_size": dict(sorted(Counter(len(r["prediction"] or []) for r in fr).items())),
+            "gold_size": dict(sorted(Counter(len(r["gold"]) for r in fr).items())),
+        }
+    fb = [record for record in records if record["task"] == "FB"]
+    if fb:
+        details["FB"] = {}
+        for name, group in (("gold_empty", [r for r in fb if not r["gold"]]),
+                            ("gold_nonempty", [r for r in fb if r["gold"]])):
+            correct = sum(r["prediction"] is not None and set(r["prediction"]) == set(r["gold"]) for r in group)
+            details["FB"][name] = {"exact_match": correct / len(group) if group else 0.0, "count": len(group)}
+    for task in ("YN", "CO"):
+        group = [record for record in records if record["task"] == task]
+        if group:
+            confusion = Counter(f"{r['gold'][0]}->{r['prediction'][0] if r['prediction'] else None}" for r in group)
+            details[task] = {"confusion": dict(sorted(confusion.items()))}
+    return details

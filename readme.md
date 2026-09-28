@@ -14,14 +14,28 @@ spartqa/
   splits.py               Seeded story-level train/dev splitting
   submission.py           Submission structure/format checks and fallback filling
   repro.py                set_seed and run metadata for fine-tuning runs
+  prompting.py            Qwen3 chat prompts (F and L-CoT) and answer parsing
+  predictions.py          Shared JSONL prediction format, resume, and filling
+  postprocess.py          FR constraints, Human YN DK policy, indifinite rules
+  voting.py               Self-consistency and weighted source voting
+  inference.py            Inference jobs, fallback answers, dev scoring
+  hub.py / tracking.py    Hugging Face Hub storage and W&B logging (optional)
 make_splits.py            Create or rebuild Data/splits from the committed manifest
 evaluate.py               Official metrics, Final Score, and story bootstrap CIs
 validate_submission.py    Check (and optionally fill) a prediction file
+explore.py                Dataset statistics and pipeline assumption checks
+prepare_sft.py            Branch F training JSONL (Auto stage, Human stage)
+train_lora.py             Branch F: Qwen3-8B LoRA fine-tuning with Hub resume
+infer_f.py                Branch F: vLLM inference with the LoRA adapter
+llm_cot.py                Branch L-CoT: Qwen3-32B-FP8 thinking + self-consistency
+ensemble.py               Dev-tuned ensemble, post-processing, submission files
+run_colab.ipynb           Colab H100 notebook that runs the whole pipeline
 gpt_experiment.py         API experiment CLI, cache, exports, and configuration
 XLNER.py                  XLNet training/evaluation/prediction CLI
 test_gpt_experiment.py    Mocked API and resume tests
 test_spartqa.py           Shared utilities and Git publication tests
 test_evaluation.py        Split, metric, submission, and seed tests
+test_pipeline.py          Prompt, post-processing, voting, and ensemble tests
 Docs/
   spartqa_cot.txt          Versioned default prompt
   gpt_experiment.md        API experiment options and output details
@@ -157,6 +171,52 @@ In training scripts, call `spartqa.repro.set_seed(seed)` before creating
 models and loaders, and save `spartqa.repro.run_metadata(seed=seed, ...)` with
 each run (git commit, dirty flag, package versions, time).
 
+## Qwen3 Pipeline on Colab (H100)
+
+`run_colab.ipynb` clones this repository, installs `requirements-colab.txt`,
+and runs every step as a separate `python script.py` process, so no model stays
+in the notebook kernel. Edit the `CONFIG` cell or keep its defaults, then Run
+all. Secrets: `HF_TOKEN` (write), `WANDB_API_KEY`, optionally `WANDB_ENTITY`
+and `GITHUB_TOKEN`. Put the four data files in the Drive folder `DRIVE_DATA_DIR`.
+
+| Step | Script | Output |
+| --- | --- | --- |
+| Statistics and checks | `explore.py` | `outputs/explore/report.json` |
+| F stage 1 (Auto 50k, 1 epoch) | `prepare_sft.py`, `train_lora.py` | adapter on the Hub |
+| F1 inference, backup submission | `infer_f.py`, `ensemble.py --only F1` | `outputs/submission_backup/` |
+| F stage 2 (Human + 2k Auto) | `prepare_sft.py`, `train_lora.py --init-adapter` | adapter on the Hub |
+| L-CoT for Human (n=8) | `llm_cot.py` | vote shares per label |
+| Ensemble and submission | `ensemble.py` | `outputs/submission/<dataset>/` |
+
+Every step resumes: training continues from the newest checkpoint (local, or
+`last-checkpoint/` in the private Hub model repo), and inference appends
+predictions to `outputs/predictions/<source>/<dataset>_<split>.jsonl` in chunks
+and uploads them to the private results dataset repo. W&B receives metrics,
+configs, timings, and small tables only; models are never uploaded there, runs
+record the Hub repo and commit hash instead.
+
+`ensemble.py` picks, per question type, the best single source or weighted vote
+on dev, applies post-processing, validates the submission structure, and writes
+an ablation table. Two flags are decisions for the organizers' rules:
+
+- `--use-indifinite` (default off): the question field `indifinite` is True
+  exactly when YN is DK or FR is [7] in both training files, and it is present
+  in the public test files. The rule forces DK there and forbids it elsewhere.
+  It is not a documented input, so enable it only if the organizers allow it.
+  The ablation always reports the dev score with the other setting.
+- `--human-yn-dk keep|no`: Human YN is documented as Yes/No, but Human train
+  has 16 DK answers. `no` maps DK to the likelier of Yes/No.
+
+Local smoke test without a GPU (small model, CPU):
+
+```powershell
+python prepare_sft.py --stage auto --limit 200 --output-dir outputs/smoke/sft
+python train_lora.py --train-file outputs/smoke/sft/train.jsonl --model-name Qwen/Qwen3-0.6B `
+    --output-dir outputs/smoke/ckpt --limit 16 --max-steps 3 --batch-size 2 --no-push
+```
+
+vLLM inference (`infer_f.py`, `llm_cot.py`) needs a CUDA GPU.
+
 ## Metrics and Caveats
 
 | Task | Answer | Metrics |
@@ -192,7 +252,7 @@ separately before comparing future configurations. Consult the original
 
 ```powershell
 python -m unittest discover -v
-python -m compileall -q spartqa gpt_experiment.py XLNER.py test_gpt_experiment.py test_spartqa.py
+python -m compileall -q spartqa *.py
 ```
 
 The tests need only Python's standard library. Git is needed for the ignore-rule
