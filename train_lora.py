@@ -164,6 +164,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--save-steps", type=int, default=300)
     parser.add_argument("--logging-steps", type=int, default=20)
     parser.add_argument("--attn-implementation", default="sdpa")
+    parser.add_argument("--gradient-checkpointing", action=argparse.BooleanOptionalAction, default=True,
+                        help="Recompute activations to save VRAM (about 30%% slower). With group_by_length "
+                             "the longest batch runs first, so an out-of-memory error shows at step 1.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--run-name")
     args = parser.parse_args(argv)
@@ -200,7 +203,8 @@ def main(argv: list[str] | None = None) -> int:
               "learning_rate": args.learning_rate, "scheduler": "cosine", "warmup_ratio": args.warmup_ratio,
               "epochs": args.epochs, "max_steps": args.max_steps, "batch_size": args.batch_size,
               "gradient_accumulation_steps": args.gradient_accumulation_steps, "effective_batch": effective_batch,
-              "max_len": args.max_len, "seed": args.seed, "train_file": args.train_file, "dev_file": args.dev_file,
+              "max_len": args.max_len, "seed": args.seed, "gradient_checkpointing": args.gradient_checkpointing,
+              "train_file": args.train_file, "dev_file": args.dev_file,
               "train_records": len(train_set), "dropped_too_long": dropped, "train_tokens": train_tokens,
               "prompt_version": prompt_version("F"), "resumed_from": resume}
     stats_path = Path(args.train_file).with_name("stats.json")
@@ -211,8 +215,9 @@ def main(argv: list[str] | None = None) -> int:
 
     model = load_base_model(args.model_name, args.attn_implementation)
     model.config.use_cache = False
-    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-    model.enable_input_require_grads()
+    if args.gradient_checkpointing:
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        model.enable_input_require_grads()
     if args.init_adapter:
         source = args.init_adapter if Path(args.init_adapter).exists() else hub.resolve_repo(args.init_adapter)
         adapter_path, init_revision = hub.resolve_adapter(source, args.output_dir / "init_adapter")
@@ -240,8 +245,9 @@ def main(argv: list[str] | None = None) -> int:
         "save_total_limit": 2, "eval_strategy": args.save_strategy if has_eval else "no",
         "evaluation_strategy": args.save_strategy if has_eval else "no", "eval_steps": args.save_steps,
         "load_best_model_at_end": has_eval, "metric_for_best_model": "eval_loss" if has_eval else None,
-        "greater_is_better": False, "bf16": True, "gradient_checkpointing": True,
-        "gradient_checkpointing_kwargs": {"use_reentrant": False}, "group_by_length": True,
+        "greater_is_better": False, "bf16": True, "gradient_checkpointing": args.gradient_checkpointing,
+        "gradient_checkpointing_kwargs": {"use_reentrant": False} if args.gradient_checkpointing else None,
+        "group_by_length": True,
         "remove_unused_columns": False, "dataloader_num_workers": 2, "seed": args.seed, "data_seed": args.seed,
         "report_to": ["wandb"] if tracking.active() else "none", "run_name": name,
         "push_to_hub": False,
