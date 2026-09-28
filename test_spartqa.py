@@ -58,11 +58,14 @@ class PublicationTests(unittest.TestCase):
             "Data/human_train.json", "Data/auto_train.json", "Data/human_public_test.json",
             "__pycache__/module.pyc", ".venv/pyvenv.cfg", "Untitled.ipynb",
             "weights/model.safetensors", ".jupyter/settings.json", "Docs/reference.pdf",
+            "Data/splits/human_train.json", "Data/splits/auto_dev.json", ".lh/.lhignore",
         ]
         included = [
             ".env.example", ".gitignore", "readme.md", "gpt_experiment.py", "XLNER.py",
             "spartqa/api.py", "spartqa/data.py", "spartqa/metrics.py", "test_spartqa.py",
             "test_gpt_experiment.py", "Data/README.md", "Docs/spartqa_cot.txt",
+            "Data/splits/manifest.json", "make_splits.py", "evaluate.py", "validate_submission.py",
+            "spartqa/splits.py", "spartqa/submission.py", "spartqa/repro.py", "test_evaluation.py",
             ".github/workflows/tests.yml", "requirements-api.txt", "requirements.txt",
         ]
         with tempfile.TemporaryDirectory() as directory:

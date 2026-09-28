@@ -21,3 +21,6 @@ and an `answer` list when labeled. Preserve the stories and their question lists
 YN uses a single string, FR uses relation indices, FB uses block identifiers, and
 CO uses a single integer. Human train includes DK labels; do not discard them.
 When creating a validation split, keep all questions of a story together.
+
+`python make_splits.py --from-manifest` recreates the story-level train/dev files
+in `Data/splits/` from the committed `manifest.json`. See the main readme.

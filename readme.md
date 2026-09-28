@@ -11,10 +11,17 @@ spartqa/
   data.py                 JSON I/O, answer labels, validation, API input records
   metrics.py              Accuracy, exact-match, and Jaccard scoring
   api.py                  Structured requests and sanitized API response handling
+  splits.py               Seeded story-level train/dev splitting
+  submission.py           Submission structure/format checks and fallback filling
+  repro.py                set_seed and run metadata for fine-tuning runs
+make_splits.py            Create or rebuild Data/splits from the committed manifest
+evaluate.py               Official metrics, Final Score, and story bootstrap CIs
+validate_submission.py    Check (and optionally fill) a prediction file
 gpt_experiment.py         API experiment CLI, cache, exports, and configuration
 XLNER.py                  XLNet training/evaluation/prediction CLI
 test_gpt_experiment.py    Mocked API and resume tests
 test_spartqa.py           Shared utilities and Git publication tests
+test_evaluation.py        Split, metric, submission, and seed tests
 Docs/
   spartqa_cot.txt          Versioned default prompt
   gpt_experiment.md        API experiment options and output details
@@ -103,6 +110,53 @@ Model weights require a download and substantial memory. Only load checkpoints
 from trusted sources. Checkpoint keys, head dimensions, and task-ID order are
 unchanged by the refactor. The two CLIs retain their previous arguments.
 
+## Splits, Evaluation, and Submission
+
+These tools need only the standard library, so any fine-tuning code can use them.
+
+```powershell
+python make_splits.py                   # first time: writes Data/splits/* and manifest.json
+python make_splits.py --from-manifest   # elsewhere: rebuilds byte-identical files
+```
+
+Splits are by **story**, never by question, so no story appears in both train
+and dev. Defaults: seed 42, Human dev 20% (7 stories, 116 questions), Auto dev
+10% (1,308 stories, 10,201 questions). Among 100 seeded shuffles, the dev set
+closest to the full file's question-type and label distribution is kept.
+`Data/splits/manifest.json` stores only story indices and source SHA-256
+checksums, so it is committed; the split JSON files stay local like the data.
+`--from-manifest` refuses to run if the source files have changed.
+
+Fine-tune on `*_train.json`, select checkpoints and thresholds on `*_dev.json`,
+and never tune on the public test. Predictions must keep the input JSON
+structure and only fill `answer`:
+
+```powershell
+python evaluate.py --human outputs/run/human_dev_pred.json Data/splits/human_dev.json `
+                   --auto outputs/run/auto_dev_pred.json Data/splits/auto_dev.json `
+                   --bootstrap 1000 --output outputs/run/dev_eval.json
+python validate_submission.py outputs/run/human_public_test_pred.json --reference Data/human_public_test.json
+```
+
+`evaluate.py` reports YN/CO accuracy and FR/FB exact match and Jaccard per
+dataset, the official Final Score `(Human + Auto) / 2` per metric, breakdowns by
+`reasoning_type`, and optional 95% intervals from resampling whole stories.
+Missing or invalid answers count as wrong. `primary_macro_unofficial`, the mean
+primary metric over the four types, is only a model-selection convenience.
+Human dev is small: its intervals are about ±10 points, so small differences
+there are not meaningful.
+
+`validate_submission.py` fails if anything other than `answer` changed or an
+answer is missing, mistyped, outside the candidates, or mixes FR label 7 with
+others. With `--fill-from Data/human_train.json --output FILE`, invalid answers
+are replaced by the most frequent training answer of that type and listed.
+This majority fallback scores Final ≈ 0.33 (mean primary) on dev, a floor any
+model should exceed.
+
+In training scripts, call `spartqa.repro.set_seed(seed)` before creating
+models and loaders, and save `spartqa.repro.run_metadata(seed=seed, ...)` with
+each run (git commit, dirty flag, package versions, time).
+
 ## Metrics and Caveats
 
 | Task | Answer | Metrics |
@@ -118,7 +172,8 @@ DK labels despite the binary-YN description in the original task document.
 
 This is a structural refactor, not a change to experimental methodology:
 
-- The fixed story-level 80/20 validation files have **not yet been created**.
+- Story-level dev splits now exist (`make_splits.py`); the API runner and XLNet
+  script do not use them yet.
 - XLNet still splits questions internally; stories may overlap between train
   and eval. Its combined-file metrics are pooled, not Human/Auto macro-averaged.
 - XLNet still truncates the story/question text as one sequence; long stories

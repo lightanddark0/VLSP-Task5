@@ -22,6 +22,11 @@ jobs:
       - name: Test without API keys, datasets, or model packages
         run: python -m unittest discover -v
       - name: Check Python syntax
-        run: python -m compileall -q spartqa gpt_experiment.py XLNER.py test_gpt_experiment.py test_spartqa.py
+        run: python -m compileall -q spartqa gpt_experiment.py XLNER.py make_splits.py evaluate.py validate_submission.py test_gpt_experiment.py test_spartqa.py test_evaluation.py
       - name: Check API command startup
         run: python gpt_experiment.py --help
+      - name: Check evaluation command startup
+        run: |
+          python make_splits.py --help
+          python evaluate.py --help
+          python validate_submission.py --help

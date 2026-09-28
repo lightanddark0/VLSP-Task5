@@ -17,9 +17,12 @@ dist/
 *.pth
 *.safetensors
 /Data/*.json
+/Data/splits/*
+!/Data/splits/manifest.json
 /Docs/*.pdf
 
 .jupyter/
 .ipynb_checkpoints/
 /Untitled*.ipynb
 .vscode/
+.lh/
