@@ -1,6 +1,6 @@
 """Branch F inference: Qwen3-8B + LoRA adapter with vLLM (greedy, thinking off).
 
-    python infer_f.py --adapter vispatialqa-f-qwen3-8b-auto --source F1 \\
+    python infer_f.py --adapter qwen3-8b-vi-spatial-lora-s1 --source F1 \\
         --job auto,Data/splits/auto_dev.json,outputs/pred/F1/auto_dev.jsonl \\
         --job auto,Data/auto_public_test.json,outputs/pred/F1/auto_test.jsonl
 

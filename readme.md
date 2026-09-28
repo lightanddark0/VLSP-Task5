@@ -188,12 +188,17 @@ and `GITHUB_TOKEN`. Put the four data files in the Drive folder `DRIVE_DATA_DIR`
 | L-CoT for Human (n=8) | `llm_cot.py` | vote shares per label |
 | Ensemble and submission | `ensemble.py` | `outputs/submission/<dataset>/` |
 
-Every step resumes: training continues from the newest checkpoint (local, or
-`last-checkpoint/` in the private Hub model repo), and inference appends
-predictions to `outputs/predictions/<source>/<dataset>_<split>.jsonl` in chunks
-and uploads them to the private results dataset repo. W&B receives metrics,
-configs, timings, and small tables only; models are never uploaded there, runs
-record the Hub repo and commit hash instead.
+Every step resumes: training continues from the newest checkpoint in
+`DRIVE_CKPT_DIR` on Google Drive, and inference appends predictions to
+`outputs/predictions/<source>/<dataset>_<split>.jsonl` in chunks, which the
+notebook backs up to Drive and restores in a new session.
+
+Storage: the only thing sent to Hugging Face is each final adapter, as a public
+repo with a one-line model card and a `run_config.json` holding the base model
+and prompt version (`HF_PUBLIC_MODELS=False` sends nothing). Checkpoints, data,
+predictions, and submissions stay on Drive, since they contain the organizers'
+stories and questions. W&B receives metrics, configs, timings, and small tables
+only; runs record the adapter repo and commit hash.
 
 `ensemble.py` picks, per question type, the best single source or weighted vote
 on dev, applies post-processing, validates the submission structure, and writes

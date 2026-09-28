@@ -2,18 +2,21 @@
 
 Stage 1 (Auto):
     python train_lora.py --train-file outputs/sft/auto/train.jsonl --dev-file outputs/sft/auto/dev.jsonl \\
-        --output-dir /content/ckpt/f_auto --hub-repo vispatialqa-f-qwen3-8b-auto --stage stage1
+        --output-dir /content/ckpt/f_auto --hub-repo qwen3-8b-vi-spatial-lora-s1 --stage stage1
 Stage 2 (Human), continuing from the stage 1 adapter:
     python train_lora.py --train-file outputs/sft/human/train.jsonl --dev-file outputs/sft/human/dev.jsonl \\
-        --init-adapter vispatialqa-f-qwen3-8b-auto --output-dir /content/ckpt/f_human \\
-        --hub-repo vispatialqa-f-qwen3-8b-human --stage stage2 --learning-rate 5e-5 --epochs 3 \\
+        --init-adapter qwen3-8b-vi-spatial-lora-s1 --output-dir /content/ckpt/f_human \\
+        --hub-repo qwen3-8b-vi-spatial-lora-s2 --stage stage2 --learning-rate 5e-5 --epochs 3 \\
         --gradient-accumulation-steps 2 --save-strategy epoch
 Smoke test: add --limit 200 --max-steps 20 --no-push.
 
 Loss covers only the answer tokens. The prompt is the Qwen3 chat template with
-thinking disabled, identical to infer_f.py. Checkpoints are pushed to the
-private Hub repo (folder last-checkpoint/) while training; a rerun resumes from
-the newest local checkpoint, or else from the Hub. Only the adapter is stored.
+thinking disabled, identical to infer_f.py. Checkpoints are saved only in
+--output-dir (put it on Google Drive to survive a Colab disconnect); a rerun
+resumes from the newest checkpoint there. Nothing is pushed to the Hub during
+training. The final adapter is uploaded to ``--hub-repo`` as a public repo
+(``--hub-private`` to keep it private) with a one-line model card and a minimal
+run_config.json; full run details stay in --output-dir and in W&B.
 """
 
 from __future__ import annotations
@@ -30,6 +33,14 @@ from spartqa import hub, tracking
 from spartqa.data import write_json
 from spartqa.prompting import prompt_version, render_prompt
 from spartqa.repro import run_metadata, set_seed
+
+MODEL_CARD = """---
+base_model: {base}
+library_name: peft
+---
+
+LoRA adapter for {base}.
+"""
 
 LORA_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
@@ -95,18 +106,12 @@ def load_base_model(name: str, attn_implementation: str) -> Any:
                                                 attn_implementation=attn_implementation)
 
 
-def find_resume_checkpoint(output_dir: Path, hub_repo: str | None) -> str | None:
+def find_resume_checkpoint(output_dir: Path) -> str | None:
     from transformers.trainer_utils import get_last_checkpoint
-    local = get_last_checkpoint(str(output_dir)) if output_dir.exists() else None
-    if local:
-        return local
-    if (output_dir / "last-checkpoint" / "trainer_state.json").exists():
-        return str(output_dir / "last-checkpoint")
-    if hub.repo_has_path(hub_repo, "last-checkpoint"):
-        print(f"Downloading last-checkpoint from {hub_repo} to resume")
-        hub.download(hub_repo, output_dir, allow_patterns=["last-checkpoint/*", tracking.RUN_ID_FILE])
-        return str(output_dir / "last-checkpoint")
-    return None
+    checkpoint = get_last_checkpoint(str(output_dir)) if output_dir.exists() else None
+    if checkpoint:
+        print(f"Resuming from {checkpoint}")
+    return checkpoint
 
 
 def build_callback(tokens_per_step: float) -> Any:
@@ -138,7 +143,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model-name", default="Qwen/Qwen3-8B")
     parser.add_argument("--init-adapter", help="Adapter (path or Hub repo) to continue training from, for stage 2.")
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--hub-repo", help="Private Hub model repo for checkpoints and the final adapter.")
+    parser.add_argument("--hub-repo", help="Hub model repo for the final adapter (public by default).")
+    parser.add_argument("--hub-private", action="store_true", help="Keep the final adapter repo private.")
     parser.add_argument("--no-push", action="store_true", help="Do not push to the Hub (smoke tests).")
     parser.add_argument("--no-resume", action="store_true", help="Ignore existing checkpoints.")
     parser.add_argument("--stage", default="stage1", help="Tag used in W&B, e.g. stage1 or stage2.")
@@ -171,9 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     smoke = bool(args.limit or args.max_steps > 0)
     push = bool(args.hub_repo) and not args.no_push and hub.hub_enabled()
     hub_repo = hub.resolve_repo(args.hub_repo) if push else None
-    if hub_repo:
-        hub.ensure_repo(hub_repo, "model")
-    resume = None if args.no_resume else find_resume_checkpoint(args.output_dir, hub_repo)
+    resume = None if args.no_resume else find_resume_checkpoint(args.output_dir)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     if tokenizer.pad_token is None:
@@ -204,8 +208,6 @@ def main(argv: list[str] | None = None) -> int:
         config["data_stats"] = json.loads(stats_path.read_text(encoding="utf-8"))
     tracking.init_run("F", "train", name, [dataset_tag, args.stage] + (["smoke"] if smoke else []),
                       config, run_dir=args.output_dir)
-    if hub_repo:
-        hub.upload_file(args.output_dir / tracking.RUN_ID_FILE, hub_repo, tracking.RUN_ID_FILE, "model")
 
     model = load_base_model(args.model_name, args.attn_implementation)
     model.config.use_cache = False
@@ -242,8 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         "gradient_checkpointing_kwargs": {"use_reentrant": False}, "group_by_length": True,
         "remove_unused_columns": False, "dataloader_num_workers": 2, "seed": args.seed, "data_seed": args.seed,
         "report_to": ["wandb"] if tracking.active() else "none", "run_name": name,
-        "push_to_hub": bool(hub_repo), "hub_model_id": hub_repo, "hub_strategy": "checkpoint",
-        "hub_private_repo": True,
+        "push_to_hub": False,
     }
     training_args = TrainingArguments(**supported_kwargs(TrainingArguments, values))
     trainer_kwargs = {"model": model, "args": training_args, "train_dataset": train_set,
@@ -267,15 +268,21 @@ def main(argv: list[str] | None = None) -> int:
     adapter_dir = args.output_dir / "adapter"
     trainer.save_model(str(adapter_dir))
     tokenizer.save_pretrained(str(adapter_dir))
-    write_json(adapter_dir / "run_config.json", run_metadata(
+    write_json(args.output_dir / "run_config_full.json", run_metadata(
         base_model=args.model_name, prompt_version=prompt_version("F"), args={k: str(v) for k, v in vars(args).items()},
         train_metrics=result.metrics, best_checkpoint=trainer.state.best_model_checkpoint,
         log_history=trainer.state.log_history))
+    # Published next to the adapter: only what inference needs.
+    write_json(adapter_dir / "run_config.json", {"base_model": args.model_name, "prompt_version": prompt_version("F")})
+    (adapter_dir / "README.md").write_text(MODEL_CARD.format(base=args.model_name), encoding="utf-8")
     print(f"Saved adapter to {adapter_dir}")
     if hub_repo:
-        revision = hub.upload_folder(adapter_dir, hub_repo, "", "model", "Final adapter")
+        hub.ensure_repo(hub_repo, "model", private=args.hub_private)
+        revision = hub.upload_folder(adapter_dir, hub_repo, "", "model", "Upload adapter",
+                                     ignore_patterns=["training_args.bin"])
         tracking.log_hf_link(hub_repo, revision, "adapter_out")
-        print(f"Pushed adapter to {hub.repo_url(hub_repo)} (commit {revision})")
+        print(f"Pushed adapter to {hub.repo_url(hub_repo)} (commit {revision}, "
+              f"{'private' if args.hub_private else 'public'})")
     tracking.finish()
     return 0
 

@@ -253,3 +253,18 @@ class ScriptTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HubVisibilityTests(unittest.TestCase):
+    def test_visibility_is_set_only_when_requested(self):
+        from unittest.mock import MagicMock
+        from spartqa import hub
+        api = MagicMock()
+        with patch.dict("os.environ", {"HF_TOKEN": "x"}), patch("huggingface_hub.HfApi", return_value=api):
+            hub.ensure_repo("user/adapter", "model", private=False)
+            api.create_repo.assert_called_with("user/adapter", private=False, exist_ok=True, repo_type="model")
+            api.update_repo_settings.assert_called_with("user/adapter", private=False, repo_type="model")
+            api.reset_mock()
+            hub.ensure_repo("user/results", "dataset")
+            api.create_repo.assert_called_with("user/results", private=True, exist_ok=True, repo_type="dataset")
+            api.update_repo_settings.assert_not_called()

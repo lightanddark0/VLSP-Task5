@@ -1,4 +1,9 @@
-"""Hugging Face Hub storage: private repos for adapters, predictions, and data.
+"""Hugging Face Hub storage for adapters, training checkpoints, predictions, and data.
+
+Only final adapters are meant for the Hub (public). Uploads never create a
+repo; ``ensure_repo`` must be called first with an explicit visibility.
+Checkpoints, predictions, and data are kept off the Hub (Google Drive), since
+they contain or restate the organizers' stories and questions.
 
 Every helper is a no-op (returning None) when no HF token is available, so the
 same scripts run locally without the Hub. Upload failures only print a
@@ -46,12 +51,29 @@ def repo_url(repo_id: str, repo_type: str = "model", revision: str | None = None
     return f"https://huggingface.co/{prefix}{repo_id}" + (f"/tree/{revision}" if revision else "")
 
 
-def ensure_repo(repo_id: str | None, repo_type: str = "model") -> str | None:
+def ensure_repo(repo_id: str | None, repo_type: str = "model", private: bool | None = None) -> str | None:
+    """Create the repo if missing (private unless ``private=False``).
+
+    With ``private`` given, an existing repo's visibility is also set to match;
+    with None, an existing repo is left as it is.
+    """
     if not repo_id or not hub_enabled():
         return None
     from huggingface_hub import HfApi
-    HfApi().create_repo(repo_id, private=True, exist_ok=True, repo_type=repo_type)
+    api = HfApi()
+    api.create_repo(repo_id, private=True if private is None else private, exist_ok=True, repo_type=repo_type)
+    if private is not None:
+        set_visibility(repo_id, private, repo_type)
     return repo_id
+
+
+def set_visibility(repo_id: str, private: bool, repo_type: str = "model") -> None:
+    from huggingface_hub import HfApi
+    api = HfApi()
+    if hasattr(api, "update_repo_settings"):
+        api.update_repo_settings(repo_id, private=private, repo_type=repo_type)
+    else:
+        api.update_repo_visibility(repo_id, private=private, repo_type=repo_type)
 
 
 def _commit_oid(info: Any) -> str | None:
@@ -65,7 +87,6 @@ def upload_file(path: str | Path, repo_id: str | None, path_in_repo: str,
         return None
     try:
         from huggingface_hub import HfApi
-        ensure_repo(repo_id, repo_type)
         info = HfApi().upload_file(path_or_fileobj=str(path), path_in_repo=path_in_repo, repo_id=repo_id,
                                    repo_type=repo_type, commit_message=message or f"Upload {path_in_repo}")
         return _commit_oid(info)
@@ -81,7 +102,6 @@ def upload_folder(folder: str | Path, repo_id: str | None, path_in_repo: str = "
         return None
     try:
         from huggingface_hub import HfApi
-        ensure_repo(repo_id, repo_type)
         info = HfApi().upload_folder(folder_path=str(folder), path_in_repo=path_in_repo or None, repo_id=repo_id,
                                      repo_type=repo_type, commit_message=message or f"Upload {path_in_repo or folder}",
                                      allow_patterns=allow_patterns, ignore_patterns=ignore_patterns)
