@@ -22,6 +22,8 @@ jobs:
       - name: Test without API keys, datasets, or model packages
         run: python -m unittest discover -v
       - name: Check Python syntax
-        run: python -m compileall -q spartqa gpt_experiment.py XLNER.py test_gpt_experiment.py test_spartqa.py
+        run: python -m compileall -q spartqa gpt_experiment.py XLNER.py qwen_finetune.py modal_app.py test_gpt_experiment.py test_spartqa.py
       - name: Check API command startup
         run: python gpt_experiment.py --help
+      - name: Check Qwen QLoRA CLI startup
+        run: python qwen_finetune.py --help

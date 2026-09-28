@@ -1,0 +1,10 @@
+torch==2.8.0
+torchvision==0.23.0
+nvidia-nccl-cu12==2.27.3
+transformers>=4.57,<5
+accelerate>=1.1
+peft>=0.14
+bitsandbytes>=0.45
+datasets>=3.1
+sentencepiece>=0.2
+safetensors>=0.4.5

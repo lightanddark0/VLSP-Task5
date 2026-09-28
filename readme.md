@@ -11,13 +11,24 @@ spartqa/
   data.py                 JSON I/O, answer labels, validation, API input records
   metrics.py              Accuracy, exact-match, and Jaccard scoring
   api.py                  Structured requests and sanitized API response handling
+  pot.py                  All-task graph extraction, path search, and joint reasoning
+  qwen_data.py            Story-disjoint split, prompt/answer contract (no torch dependency)
+  qwen_model.py           QLoRA quantization + LoRA setup, restricted to the language decoder
+  qwen_dataset.py         Tokenization, completion masking, collation, stage A/B sampling
+  qwen_eval.py            Constrained-decoding generation, eight-cell metrics, regression gate
+  qwen_train.py           Stage A/B training, evaluate, predict orchestration
 gpt_experiment.py         API experiment CLI, cache, exports, and configuration
 XLNER.py                  XLNet training/evaluation/prediction CLI
+qwen_finetune.py          Local CLI for Qwen3-VL-8B-Instruct QLoRA (manifest/audit/train/evaluate/predict)
+modal_app.py              Modal App/Volume wiring to run qwen_finetune.py on a GPU
 test_gpt_experiment.py    Mocked API and resume tests
 test_spartqa.py           Shared utilities and Git publication tests
 Docs/
   spartqa_cot.txt          Versioned default prompt
   gpt_experiment.md        API experiment options and output details
+  path_of_thoughts.md      PoT adaptation, controlled ablation, and pilot report
+  qwen_qlora.md            Qwen3-VL-8B-Instruct QLoRA setup, Modal commands, and evaluation gate
+  spartqa_pot_extract.txt  Structured spatial graph extraction prompt
   task_description.md     Original task description
 Data/                     Organizer-provided JSON files (local only)
 outputs/                  Results and checkpoints (local only)
@@ -102,6 +113,20 @@ to skip public-test prediction. Use `--help` for hyperparameter options.
 Model weights require a download and substantial memory. Only load checkpoints
 from trusted sources. Checkpoint keys, head dimensions, and task-ID order are
 unchanged by the refactor. The two CLIs retain their previous arguments.
+
+## Qwen3-VL-8B-Instruct QLoRA
+
+A text-only 4-bit QLoRA fine-tune targeting balanced quality across YN, FR, FB
+and CO, designed to run on [Modal](https://modal.com) (one A100-80GB GPU) via
+`modal_app.py`, or on any CUDA host via `qwen_finetune.py` directly. If you are
+already running inside the target GPU environment (e.g. a notebook with this
+repo and `requirements-qlora.txt` already in place), use `modal_runner.py`
+instead — it calls the same commands in-process, with no `modal` CLI/client
+needed. See [Docs/qwen_qlora.md](Docs/qwen_qlora.md) for the full command
+sequence, the story-disjoint manifest, the eight-cell (Human/Auto x task)
+evaluation, the non-regression gate against the quantized base model, and
+assumptions that must be verified before spending GPU budget. Nothing in
+that flow has been executed yet.
 
 ## Metrics and Caveats
 
