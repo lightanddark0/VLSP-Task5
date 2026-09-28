@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import random
+from collections import Counter
 import time
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,8 @@ from spartqa.inference import (common_arguments, configure_vllm_environment, fal
                                overall_progress, pending, print_report, score_predictions, upload_predictions)
 from spartqa.postprocess import PostprocessOptions
 from spartqa.predictions import PredictionWriter, iter_questions, payload_of, read_predictions
-from spartqa.prompting import build_cot_messages, parse_cot_answer, prompt_version, render_prompt
+from spartqa.prompting import (FR_AXES, build_cot_messages, build_fr_axis_messages, merge_axis_samples,
+                               parse_axis_answer, parse_cot_answer, prompt_version, render_prompt)
 from spartqa.voting import vote_samples
 
 
@@ -40,8 +42,11 @@ def example_pool(path: Path) -> dict[str, list[tuple[dict[str, Any], list[Any]]]
     return pool
 
 
-def pick_examples(pool: dict[str, list[Any]], task: str, key: str, k: int, seed: int) -> list[Any]:
-    candidates = pool.get(task, [])
+def pick_examples(pool: dict[str, list[Any]], task: str, key: str, k: int, seed: int,
+                  story: Any = None) -> list[Any]:
+    """k solved examples of the same type, never from the question's own story (matters when the
+    examples and the evaluated questions both come from Human train)."""
+    candidates = [c for c in pool.get(task, []) if story is None or c[0]["story"] != story]
     return random.Random(f"{seed}:{key}").sample(candidates, min(k, len(candidates))) if k else []
 
 
@@ -76,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-num-seqs", type=int, default=64)
     parser.add_argument("--fewshot-k", type=int, default=2, help="Solved same-type examples in the prompt.")
     parser.add_argument("--save-raw", action="store_true", help="Also write every sampled text to *.raw.jsonl.")
+    parser.add_argument("--q-types", default="YN,FR,FB,CO", help="Only these question types, e.g. FR.")
+    parser.add_argument("--fr-mode", choices=("joint", "checklist"), default="joint",
+                        help="checklist (E1): ask each FR axis (left/right, above/below, near/far, touch) "
+                             "separately with its own samples, then merge.")
     common_arguments(parser)
     parser.set_defaults(chunk_size=32)
     args = parser.parse_args(argv)
@@ -92,7 +101,8 @@ def main(argv: list[str] | None = None) -> int:
         "method": "prompting", "model": args.model_name, "n": args.n, "temperature": args.temperature,
         "top_p": args.top_p, "top_k": args.top_k, "max_tokens": args.max_tokens,
         "max_model_len": args.max_model_len, "max_num_seqs": args.max_num_seqs, "fewshot_k": args.fewshot_k,
-        "prompt_version": prompt_version("COT"), "seed": args.seed,
+        "prompt_version": prompt_version("COT"), "seed": args.seed, "q_types": args.q_types,
+        "fr_mode": args.fr_mode,
         "jobs": [{"dataset": job.dataset, "input": str(job.input), "output": str(job.output)} for job in args.job]})
 
     def load(model: str) -> LLM:
@@ -118,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
         fallback = fallback_answers(args.splits_dir, job.dataset)
         pool = example_pool(args.splits_dir / f"{job.dataset}_train.json")
         todo, done = pending(data, job.output, args.limit)
+        wanted = {t.strip().upper() for t in args.q_types.split(",")}
+        todo = [entry for entry in todo if entry[2]["q_type"] in wanted]
         print(f"[{job.dataset}/{job.split}] {job.input}: {done} done, {len(todo)} to predict")
         writer = PredictionWriter(job.output)
         raw_writer = PredictionWriter(job.output.with_suffix(".raw.jsonl")) if args.save_raw else None
@@ -127,35 +139,64 @@ def main(argv: list[str] | None = None) -> int:
         for start in range(0, len(todo), args.chunk_size):
             chunk = todo[start:start + args.chunk_size]
             payloads = [payload_of(item, question) for _, item, question in chunk]
-            prompts = [render_prompt(tokenizer, build_cot_messages(
-                payload, job.dataset, pick_examples(pool, payload["q_type"], key, args.fewshot_k, args.seed)),
-                enable_thinking=True) for (key, _, _), payload in zip(chunk, payloads)]
+            # One prompt per question, or one per axis for FR in checklist mode.
+            units = []   # (question index, axis or None, prompt)
+            for index, ((key, _, question), payload) in enumerate(zip(chunk, payloads)):
+                task = payload["q_type"]
+                examples = pick_examples(pool, task, key, args.fewshot_k, args.seed, payload["story"])
+                if task == "FR" and args.fr_mode == "checklist":
+                    for axis in FR_AXES:
+                        units.append((index, axis, render_prompt(
+                            tokenizer, build_fr_axis_messages(payload, job.dataset, axis, examples), enable_thinking=True)))
+                else:
+                    units.append((index, None, render_prompt(
+                        tokenizer, build_cot_messages(payload, job.dataset, examples), enable_thinking=True)))
             began = time.time()
             overall_progress(f"{args.source} {job.dataset}/{job.split}", start // args.chunk_size + 1,
                              -(-len(todo) // args.chunk_size), done + start, done + len(todo), stats["seconds"],
                              start)
-            outputs = llm.generate(prompts, sampling, use_tqdm=True)
+            outputs = llm.generate([prompt for _, _, prompt in units], sampling, use_tqdm=True)
             stats["seconds"] += time.time() - began
+            by_question: dict[int, list[tuple[str | None, Any]]] = {}
+            for (index, axis, _), output in zip(units, outputs):
+                by_question.setdefault(index, []).append((axis, output))
             records, raws = [], []
-            for (key, _, question), payload, output in zip(chunk, payloads, outputs):
-                samples = [None if sample.finish_reason == "length" else parse_cot_answer(sample.text, payload)
-                           for sample in output.outputs]
+            for index, ((key, _, question), payload) in enumerate(zip(chunk, payloads)):
+                parts = by_question[index]
+                if parts[0][0] is None:
+                    output = parts[0][1]
+                    samples = [None if sample.finish_reason == "length" else parse_cot_answer(sample.text, payload)
+                               for sample in output.outputs]
+                    invalid = sum(sample is None for sample in samples)
+                else:
+                    per_axis = {axis: [None if sample.finish_reason == "length" else parse_axis_answer(sample.text, axis)
+                                       for sample in output.outputs] for axis, output in parts}
+                    samples = merge_axis_samples(per_axis)
+                    invalid = sum(value is None for values in per_axis.values() for value in values)
                 answer, scores = vote_samples(question["q_type"], samples)
-                for sample in output.outputs:
-                    ids = list(sample.token_ids)
-                    think_lengths.append(ids.index(think_end) if think_end in ids else len(ids))
-                    stats["output_tokens"] += len(ids)
-                stats["prompt_tokens"] += len(output.prompt_token_ids)
-                stats["samples"] += len(samples)
-                stats["invalid_samples"] += sum(sample is None for sample in samples)
+                for _, output in parts:
+                    stats["prompt_tokens"] += len(output.prompt_token_ids)
+                    for sample in output.outputs:
+                        ids = list(sample.token_ids)
+                        think_lengths.append(ids.index(think_end) if think_end in ids else len(ids))
+                        stats["output_tokens"] += len(ids)
+                        stats["samples"] += 1
+                stats["invalid_samples"] += invalid
                 stats["abstain"] += answer is None
                 if scores and question["q_type"] in {"YN", "CO"}:
                     stats["agreement"] += max(scores.values())
                     stats["yn_co"] += 1
-                records.append({"key": key, "q_type": question["q_type"], "answer": answer, "scores": scores,
-                                "source": args.source, "samples": samples})
+                record = {"key": key, "q_type": question["q_type"], "answer": answer, "scores": scores,
+                          "source": args.source, "samples": samples}
+                if parts[0][0] is not None:
+                    record["fr_mode"] = "checklist"
+                    record["axes"] = {axis: Counter(tuple(v) for v in values if v is not None).most_common(1)[0][0]
+                                      if any(v is not None for v in values) else None
+                                      for axis, values in per_axis.items()}
+                records.append(record)
                 if raw_writer is not None:
-                    raws.append({"key": key, "texts": [sample.text for sample in output.outputs]})
+                    raws.append({"key": key, "texts": {str(axis): [sample.text for sample in output.outputs]
+                                                       for axis, output in parts}})
             writer.write_many(records)
             if raw_writer is not None:
                 raw_writer.write_many(raws)

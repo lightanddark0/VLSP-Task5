@@ -268,3 +268,89 @@ class HubVisibilityTests(unittest.TestCase):
             hub.ensure_repo("user/results", "dataset")
             api.create_repo.assert_called_with("user/results", private=True, exist_ok=True, repo_type="dataset")
             api.update_repo_settings.assert_not_called()
+
+
+class CheckListInferenceTests(unittest.TestCase):
+    """llm_cot.py end to end with a fake vLLM: checklist FR, type filter, no same-story examples."""
+
+    def fake_vllm(self, prompts_seen):
+        import types
+
+        class Sample:
+            def __init__(self, text):
+                self.text, self.finish_reason, self.token_ids = text, "stop", [1, 2, 3]
+
+        class Output:
+            def __init__(self, texts):
+                self.outputs = [Sample(t) for t in texts]
+                self.prompt_token_ids = [0] * 10
+
+        class Tokenizer:
+            def apply_chat_template(self, messages, **kwargs):
+                return "\n".join(m["content"] for m in messages)
+
+            def convert_tokens_to_ids(self, token):
+                return 99
+
+        answers = {"chiều ngang": "ĐÁP ÁN: [0]", "chiều dọc": "ĐÁP ÁN: []",
+                   "khoảng cách": "ĐÁP ÁN: [5]", "tiếp xúc": "ĐÁP ÁN: []"}
+
+        class LLM:
+            def __init__(self, **kwargs):
+                pass
+
+            def get_tokenizer(self):
+                return Tokenizer()
+
+            def generate(self, prompts, sampling, use_tqdm=True):
+                prompts_seen.extend(prompts)
+                outputs = []
+                for prompt in prompts:
+                    tail = prompt.rsplit("### Câu hỏi cần trả lời", 1)[1]
+                    text = next((a for axis, a in answers.items() if f"theo {axis}" in tail), 'ĐÁP ÁN: ["Yes"]')
+                    outputs.append(Output([text, text]))
+                return outputs
+
+        return types.SimpleNamespace(LLM=LLM, SamplingParams=lambda **kwargs: None)
+
+    def test_checklist_merges_axes_and_skips_other_types(self):
+        import llm_cot
+        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"WANDB_MODE": "disabled"}):
+            root = Path(directory)
+            splits = root / "splits"
+            write_json(splits / "human_train.json", dataset(4))
+            prompts = []
+            with patch.dict("sys.modules", {"vllm": self.fake_vllm(prompts)}), redirect_stdout(StringIO()):
+                llm_cot.main(["--job", f"human,{splits / 'human_train.json'},{root / 'out.jsonl'}",
+                              "--splits-dir", str(splits), "--n", "2", "--q-types", "FR", "--fr-mode", "checklist",
+                              "--fallback-model", ""])
+            records = read_predictions(root / "out.jsonl")
+        self.assertEqual({r["q_type"] for r in records.values()}, {"FR"})
+        self.assertEqual(len(records), 4)
+        self.assertEqual(records["0_3"]["answer"], [0, 5])
+        self.assertEqual(records["0_3"]["axes"]["distance"], [5])
+        self.assertEqual(len(prompts), 4 * 4)
+        for prompt in prompts:   # solved examples never come from the question's own story
+            story = prompt.rsplit("### Câu hỏi cần trả lời", 1)[1].split("Câu chuyện: ", 1)[1].split("\n", 1)[0]
+            examples = prompt.rsplit("### Câu hỏi cần trả lời", 1)[0]
+            self.assertNotIn(f"Câu chuyện: {story}\n", examples)
+
+
+class ConverseAugmentTests(unittest.TestCase):
+    def test_fr_and_yn_converse(self):
+        from spartqa.augment import converse_fr, converse_yn
+        fr = {"q_type": "FR", "question": "Mối quan hệ giữa vật nhỏ ở A và vật lớn là gì?", "answer": [0, 5]}
+        self.assertEqual(converse_fr(fr)["question"], "Mối quan hệ giữa vật lớn và vật nhỏ ở A là gì?")
+        self.assertEqual(converse_fr(fr)["answer"], [1, 5])
+        yn = {"q_type": "YN", "question": "Vật nhỏ ở B có ở bên phải vật trung bình ở C không?", "answer": ["No"]}
+        self.assertEqual(converse_yn(yn)["question"], "Vật trung bình ở C có ở bên trái vật nhỏ ở B không?")
+        self.assertEqual(converse_yn(yn)["answer"], ["No"])
+        for text in ("Vật nhỏ có ở bên trái một vật lớn không?", "Có phải tất cả vật nhỏ đều ở bên trái vật lớn không?",
+                     "Vật nhỏ có ở gần và ở bên trái của vật lớn không?", "Vật nhỏ có gần với vật lớn không?"):
+            self.assertIsNone(converse_yn({"q_type": "YN", "question": text, "answer": ["Yes"]}), text)
+
+    def test_compare_branch_parsing(self):
+        import compare_branches
+        branches = compare_branches.parse_branches("F=F2C,F1 S=S L=LCOTX")
+        self.assertEqual(branches, {"F": ["F2C", "F1"], "S": ["S"], "L": ["LCOTX"]})
+        self.assertEqual(compare_branches.priority_of(branches), ["S", "F2C", "F1", "LCOTX"])

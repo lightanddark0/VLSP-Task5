@@ -21,6 +21,7 @@ spartqa/
   inference.py            Inference jobs, fallback answers, dev scoring
   hub.py / tracking.py    Hugging Face Hub storage and W&B logging (optional)
   symbolic/               Branch S: story/question parser and spatial reasoner
+  augment.py              Converse augmentation of Human FR/YN training questions (E2)
 make_splits.py            Create or rebuild Data/splits from the committed manifest
 evaluate.py               Official metrics, Final Score, and story bootstrap CIs
 validate_submission.py    Check (and optionally fill) a prediction file
@@ -32,6 +33,8 @@ llm_cot.py                Branch L-CoT: Qwen3-32B-FP8 thinking + self-consistenc
 ensemble.py               Dev-tuned ensemble, post-processing, submission files
 solve_symbolic.py         Branch S: rule-based answers for Auto (CPU), abstains otherwise
 compare_branches.py       Scores of each branch, each pair, and all three, from saved predictions
+merge_predictions.py      Replace some question types of one prediction file with another's
+run_colab_e1e2.ipynb      Colab notebook for experiments E1 (FR checklist) and E2 (converse data)
 run_colab.ipynb           Colab H100 notebook that runs the whole pipeline
 gpt_experiment.py         API experiment CLI, cache, exports, and configuration
 XLNER.py                  XLNet training/evaluation/prediction CLI
@@ -214,6 +217,16 @@ answers about 99.5% of questions, with accuracy on those of about 97.8% (YN),
 scores F, S, L, every pair, and all three on dev (in-sample and 5-fold
 cross-validated over stories) and writes a submission per combination, without
 running any model.
+
+Experiments E1/E2 for the Human subset (`run_colab_e1e2.ipynb`, branch
+`feat/fr-checklist-augment`) reuse the saved F1/F2/S/LCOT predictions:
+- E1: `llm_cot.py --fr-mode checklist` asks each FR axis (left/right,
+  above/below, near/far, touch) as its own question with its own samples and
+  merges them; it is scored on Human train and dev (L is not trained on Human),
+  and `merge_predictions.py` puts its FR answers into the L predictions (LCOTX).
+- E2: `prepare_sft.py --augment-converse FR,YN` adds converse copies of Human
+  train questions (111 FR, 29 YN) before retraining stage 2 (source F2C).
+- `compare_branches.py --branches` compares baseline, E1, E2, and E1+E2.
 
 `ensemble.py` picks, per question type, the best single source or weighted vote
 on dev, applies post-processing, validates the submission structure, and writes

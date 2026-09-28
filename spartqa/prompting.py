@@ -166,3 +166,76 @@ def parse_cot_answer(text: str, payload: dict[str, Any]) -> list[Any] | None:
     if ANSWER_MARKER not in visible:
         return None
     return parse_answer(visible.rsplit(ANSWER_MARKER, 1)[1], payload)
+
+
+# --- E1: FR as a checklist of four independent axis questions ----------------------------------
+FR_AXES = {
+    "horizontal": ("chiều ngang (trái/phải)", (0, 1),
+                   "[0] nếu vật thứ nhất ở bên trái vật thứ hai, [1] nếu ở bên phải, [] nếu không suy ra được"),
+    "vertical": ("chiều dọc (trên/dưới)", (2, 3),
+                 "[2] nếu vật thứ nhất ở bên trên vật thứ hai, [3] nếu ở bên dưới, [] nếu không suy ra được"),
+    "distance": ("khoảng cách (gần/xa)", (4, 5),
+                 "[4] nếu vật thứ nhất ở gần vật thứ hai, [5] nếu ở xa, [] nếu không suy ra được"),
+    "touch": ("tiếp xúc (chạm)", (6,), "[6] nếu vật thứ nhất chạm vào vật thứ hai, [] nếu không suy ra được"),
+}
+
+
+def axis_answer(answer: list[int], axis: str) -> list[int]:
+    labels = FR_AXES[axis][1]
+    return sorted(label for label in answer if label in labels)
+
+
+def _axis_block(payload: dict[str, Any], dataset: str, axis: str) -> str:
+    name, _, answer_format = FR_AXES[axis]
+    return "\n".join([
+        f"Bộ dữ liệu: {dataset}",
+        f"Câu chuyện: {story_text(payload['story'])}",
+        f"Câu hỏi gốc: {payload['question'].strip()}",
+        f"Chỉ xét quan hệ theo {name} giữa vật thứ nhất và vật thứ hai trong câu hỏi gốc.",
+        f"Định dạng đáp án: {answer_format}",
+    ])
+
+
+def build_fr_axis_messages(payload: dict[str, Any], dataset: str, axis: str,
+                           examples: list[tuple[dict[str, Any], list[Any]]] = ()) -> list[dict[str, str]]:
+    """One axis of an FR question; solved examples show only that axis of their answers."""
+    parts = []
+    for index, (example, answer) in enumerate(examples, 1):
+        parts.append(f"### Ví dụ {index}\n{_axis_block(example, dataset, axis)}\n"
+                     f"{ANSWER_MARKER} {json.dumps(axis_answer(answer, axis))}")
+    parts.append(f"### Câu hỏi cần trả lời\n{_axis_block(payload, dataset, axis)}")
+    return [{"role": "system", "content": COT_SYSTEM_PROMPT}, {"role": "user", "content": "\n\n".join(parts)}]
+
+
+def parse_axis_answer(text: str, axis: str) -> list[int] | None:
+    """Labels of one axis after the last 'ĐÁP ÁN:'; [] allowed; None if missing or contradictory."""
+    if "<think>" in text and "</think>" not in text:
+        return None
+    visible = text.rsplit("</think>", 1)[-1]
+    if ANSWER_MARKER not in visible:
+        return None
+    match = _LIST.search(visible.rsplit(ANSWER_MARKER, 1)[1])
+    if match is None:
+        return None
+    try:
+        values = _coerce(json.loads(match.group(0)), "FR")
+    except (ValueError, TypeError):
+        return None
+    labels = FR_AXES[axis][1]
+    if any(value not in labels for value in values) or len(set(values)) > 1:
+        return None
+    return sorted(set(values))
+
+
+def merge_axis_samples(per_axis: dict[str, list[list[int] | None]]) -> list[list[int] | None]:
+    """Sample i of the checklist = union over axes of sample i; [7] when no axis holds; None if all failed."""
+    count = max((len(samples) for samples in per_axis.values()), default=0)
+    merged = []
+    for index in range(count):
+        parts = [samples[index] if index < len(samples) else None for samples in per_axis.values()]
+        if all(part is None for part in parts):
+            merged.append(None)
+            continue
+        labels = sorted({label for part in parts if part for label in part})
+        merged.append(labels or [7])
+    return merged

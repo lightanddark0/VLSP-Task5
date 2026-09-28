@@ -33,7 +33,21 @@ from spartqa.predictions import fill_answers, iter_questions, read_predictions, 
 from spartqa.submission import answer_problems, compare_structure
 
 BRANCHES = {"F": ["F2", "F1"], "S": ["S"], "L": ["LCOT"]}
-PRIORITY = ["S", "F2", "F1", "LCOT"]   # fallback order when every weighted source abstains
+
+
+def parse_branches(text: str) -> dict[str, list[str]]:
+    """'F=F2C,F1 S=S L=LCOTX' -> {"F": ["F2C", "F1"], ...}; order inside a branch is its priority."""
+    branches = {}
+    for item in text.split():
+        name, _, sources = item.partition("=")
+        branches[name] = [s for s in sources.split(",") if s]
+    return branches
+
+
+def priority_of(branches: dict[str, list[str]]) -> list[str]:
+    """Fallback order when every weighted source abstains: S first (most precise), then branch order."""
+    order = [s for b in branches.values() for s in b]
+    return sorted(dict.fromkeys(order), key=lambda s: (s != "S", order.index(s)))
 
 
 def tune(questions: list[tuple[str, dict]], sources: dict, names: list[str], dataset: str,
@@ -91,16 +105,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--use-indifinite", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--human-yn-dk", choices=("keep", "no"), default="keep")
     parser.add_argument("--submission-names", default="human=human_submission.json,auto=auto_submission.json")
+    parser.add_argument("--branches", default="F=F2,F1 S=S L=LCOT",
+                        help="Sources of each branch, e.g. 'F=F2C,F1 S=S L=LCOTX' (experiments E1/E2).")
     parser.add_argument("--run-name")
     args = parser.parse_args(argv)
+    branches = parse_branches(args.branches)
+    priority = priority_of(branches)
 
     options = PostprocessOptions(use_indifinite=args.use_indifinite, human_yn_dk=args.human_yn_dk)
     grid = [float(v) for v in args.weights.split(",")]
     thresholds = [float(v) for v in args.thresholds.split(",")]
     submission_names = dict(item.split("=", 1) for item in args.submission_names.split(","))
-    combos = [combo for size in (1, 2, 3) for combo in itertools.combinations(BRANCHES, size)]
+    combos = [combo for size in range(1, len(branches) + 1) for combo in itertools.combinations(branches, size)]
     tracking.init_run("ensemble", "eval", args.run_name or tracking.run_name("compare", "eval", "all", "dev"),
-                      ["compare"], {"postprocess": options.as_dict(), "branches": BRANCHES, "cv_folds": args.cv_folds})
+                      ["compare"], {"postprocess": options.as_dict(), "branches": branches, "cv_folds": args.cv_folds})
 
     results: dict[str, dict[str, Any]] = {"+".join(c): {} for c in combos}
     for dataset in args.datasets:
@@ -108,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         test_data = read_json(args.data_dir / f"{dataset}_public_test.json")
         fallback = fallback_answers(args.splits_dir, dataset)
         available = {}
-        for source in PRIORITY:
+        for source in priority:
             dev_path = args.pred_dir / source / f"{dataset}_dev.jsonl"
             test_path = args.pred_dir / source / f"{dataset}_test.jsonl"
             if dev_path.exists() and test_path.exists():
@@ -117,8 +135,8 @@ def main(argv: list[str] | None = None) -> int:
         questions = [(key, q) for key, _, q in iter_questions(dev_data) if "answer" in q]
         for combo in combos:
             name = "+".join(combo)
-            used = [b for b in combo if any(s in available for s in BRANCHES[b])]
-            names = [s for s in PRIORITY if s in available and any(s in BRANCHES[b] for b in used)]
+            used = [b for b in combo if any(s in available for s in branches[b])]
+            names = [s for s in priority if s in available and any(s in branches[b] for b in used)]
             if not names:
                 results[name][dataset] = None
                 continue

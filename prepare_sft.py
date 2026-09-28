@@ -21,18 +21,28 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from spartqa.augment import converse_questions
 from spartqa.data import TASKS, read_json, write_json
 from spartqa.predictions import iter_questions, payload_of
 from spartqa.prompting import build_messages, format_answer, prompt_version
 
 
-def records_from(path: Path, dataset: str) -> list[dict[str, Any]]:
+def records_from(path: Path, dataset: str, augment: set[str] = frozenset()) -> list[dict[str, Any]]:
+    """Training records; ``augment`` ({"FR", "YN"}) adds converse copies of safe questions (E2)."""
     records = []
-    for key, item, question in iter_questions(read_json(path)):
+    data = read_json(path)
+    for key, item, question in iter_questions(data):
         payload = payload_of(item, question)
         records.append({"key": f"{dataset}:{key}", "dataset": dataset, "q_type": question["q_type"],
                         "messages": build_messages(payload, dataset),
                         "target": format_answer(question["answer"], payload)})
+    if augment:
+        for story_index, item in enumerate(data["data"]):
+            for question in converse_questions(item["questions"], augment):
+                payload = payload_of(item, question)
+                records.append({"key": f"{dataset}:{story_index}_{question['q_id']}:converse", "dataset": dataset,
+                                "q_type": question["q_type"], "messages": build_messages(payload, dataset),
+                                "target": format_answer(question["answer"], payload)})
     return records
 
 
@@ -78,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Auto questions for stage auto; 0 (default) = all, else a type-balanced sample.")
     parser.add_argument("--type-ratio", type=parse_ratio, default=parse_ratio("YN=0.25,FR=0.30,FB=0.25,CO=0.20"))
     parser.add_argument("--human-repeat", type=int, default=1, help="Copies of each Human question (stage human).")
+    parser.add_argument("--augment-converse", default="",
+                        help="Stage human: add converse copies of Human train questions, e.g. 'FR' or 'FR,YN' (E2).")
     parser.add_argument("--auto-mix", type=int, default=2000, help="Auto questions mixed into stage human.")
     parser.add_argument("--dev-samples", type=int, default=1000, help="Auto dev questions kept for eval loss.")
     parser.add_argument("--seed", type=int, default=42)
@@ -93,7 +105,8 @@ def main(argv: list[str] | None = None) -> int:
             else list(auto_train)
         dev = balanced_sample(auto_dev, args.dev_samples, args.type_ratio, rng)
     else:
-        human_train = records_from(args.splits_dir / "human_train.json", "human")
+        augment = {kind.strip().upper() for kind in args.augment_converse.split(",") if kind.strip()}
+        human_train = records_from(args.splits_dir / "human_train.json", "human", augment)
         train = human_train * args.human_repeat
         train += balanced_sample(auto_train, args.auto_mix, args.type_ratio, rng) if args.auto_mix else []
         dev = records_from(args.splits_dir / "human_dev.json", "human")
@@ -105,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
     write_jsonl(args.output_dir / "dev.jsonl", dev)
     stats = {
         "stage": args.stage, "seed": args.seed, "prompt_version": prompt_version("F"),
+        "augment_converse": args.augment_converse,
+        "converse_records": sum(r["key"].endswith(":converse") for r in train),
         "train": {"count": len(train), "by_dataset": Counter(r["dataset"] for r in train),
                   "by_task": Counter(r["q_type"] for r in train)},
         "dev": {"count": len(dev), "by_dataset": Counter(r["dataset"] for r in dev),
