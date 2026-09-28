@@ -24,7 +24,7 @@ from typing import Any
 from spartqa import hub, tracking
 from spartqa.data import read_json
 from spartqa.inference import (common_arguments, fallback_answers, log_report, pending, print_report,
-                               score_predictions, upload_predictions)
+                               overall_progress, score_predictions, upload_predictions)
 from spartqa.postprocess import PostprocessOptions
 from spartqa.predictions import PredictionWriter, iter_questions, payload_of, read_predictions
 from spartqa.prompting import build_cot_messages, parse_cot_answer, prompt_version, render_prompt
@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fewshot-k", type=int, default=2, help="Solved same-type examples in the prompt.")
     parser.add_argument("--save-raw", action="store_true", help="Also write every sampled text to *.raw.jsonl.")
     common_arguments(parser)
-    parser.set_defaults(chunk_size=64)
+    parser.set_defaults(chunk_size=32)
     args = parser.parse_args(argv)
 
     from vllm import LLM, SamplingParams
@@ -118,7 +118,10 @@ def main(argv: list[str] | None = None) -> int:
                 payload, job.dataset, pick_examples(pool, payload["q_type"], key, args.fewshot_k, args.seed)),
                 enable_thinking=True) for (key, _, _), payload in zip(chunk, payloads)]
             began = time.time()
-            outputs = llm.generate(prompts, sampling)
+            overall_progress(f"{args.source} {job.dataset}/{job.split}", start // args.chunk_size + 1,
+                             -(-len(todo) // args.chunk_size), done + start, done + len(todo), stats["seconds"],
+                             start)
+            outputs = llm.generate(prompts, sampling, use_tqdm=True)
             stats["seconds"] += time.time() - began
             records, raws = [], []
             for (key, _, question), payload, output in zip(chunk, payloads, outputs):
@@ -144,9 +147,9 @@ def main(argv: list[str] | None = None) -> int:
             if raw_writer is not None:
                 raw_writer.write_many(raws)
             stats["questions"] += len(records)
-            print(f"  wrote {done + start + len(chunk)}/{done + len(todo)} "
-                  f"({stats['seconds'] / 60:.1f} min generating)", flush=True)
             upload_predictions(job.output, args.results_repo, f"{args.results_prefix}/{args.source}")
+        overall_progress(f"{args.source} {job.dataset}/{job.split}", None, None, done + len(todo),
+                         done + len(todo), stats["seconds"], len(todo))
 
         count = max(stats["questions"], 1)
         think_lengths.sort()

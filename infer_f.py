@@ -21,7 +21,7 @@ from pathlib import Path
 from spartqa import hub, tracking
 from spartqa.data import read_json
 from spartqa.inference import (common_arguments, fallback_answers, log_report, pending, print_report,
-                               score_predictions, upload_predictions)
+                               progress_bar, score_predictions, upload_predictions)
 from spartqa.postprocess import PostprocessOptions
 from spartqa.predictions import PredictionWriter, one_hot_scores, payload_of, read_predictions
 from spartqa.prompting import build_messages, parse_answer, prompt_version, render_prompt
@@ -74,12 +74,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{job.dataset}/{job.split}] {job.input}: {done} done, {len(todo)} to predict")
         writer = PredictionWriter(job.output)
         stats = {"questions": 0, "fallback": 0, "prompt_tokens": 0, "output_tokens": 0, "seconds": 0.0}
+        bar = progress_bar(f"{args.source} {job.dataset}/{job.split}", done, len(todo))
         for start in range(0, len(todo), args.chunk_size):
             chunk = todo[start:start + args.chunk_size]
             payloads = [payload_of(item, question) for _, item, question in chunk]
             prompts = [render_prompt(tokenizer, build_messages(payload, job.dataset)) for payload in payloads]
             began = time.time()
-            outputs = llm.generate(prompts, sampling, lora_request=lora)
+            outputs = llm.generate(prompts, sampling, lora_request=lora, use_tqdm=False)
             stats["seconds"] += time.time() - began
             records = []
             for (key, _, question), payload, output in zip(chunk, payloads, outputs):
@@ -98,8 +99,9 @@ def main(argv: list[str] | None = None) -> int:
                                 "fallback": used_fallback, "raw": text[:200]})
             writer.write_many(records)
             stats["questions"] += len(records)
-            print(f"  wrote {done + start + len(chunk)}/{done + len(todo)}", flush=True)
+            bar.update(len(chunk))
             upload_predictions(job.output, args.results_repo, f"{args.results_prefix}/{args.source}")
+        bar.close()
 
         count = max(stats["questions"], 1)
         tag = f"infer/{job.dataset}/{job.split}"

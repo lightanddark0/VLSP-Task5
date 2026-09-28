@@ -107,9 +107,34 @@ def common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--splits-dir", type=Path, default=Path("Data/splits"),
                         help="Train splits used for majority fallback answers.")
     parser.add_argument("--limit", type=int, help="Only the first N questions of each file (smoke test).")
-    parser.add_argument("--chunk-size", type=int, default=2000, help="Questions per saved chunk.")
+    parser.add_argument("--chunk-size", type=int, default=1000,
+                        help="Questions per saved chunk; the progress bar advances once per chunk.")
     parser.add_argument("--results-repo", help="Private Hub dataset repo for prediction files.")
     parser.add_argument("--results-prefix", default="predictions", help="Folder inside the results repo.")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.90)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--run-name")
+
+
+def progress_bar(label: str, done: int, todo: int) -> Any:
+    """Progress bar over all questions of a job (already-done questions shown as completed).
+
+    Written to stdout with carriage returns, so the Colab notebook shows one
+    updating line with elapsed time, rate, and ETA.
+    """
+    import sys
+
+    from tqdm.auto import tqdm
+    return tqdm(total=done + todo, initial=done, desc=label, unit="câu", file=sys.stdout, ncols=100,
+                mininterval=1.0, smoothing=0.1)
+
+
+def overall_progress(label: str, chunk: int | None, chunks: int | None, finished: int, total: int,
+                     seconds: float, finished_this_run: int) -> None:
+    """One summary line per chunk (for slow jobs whose inner vLLM bar covers a single chunk)."""
+    share = finished / total if total else 1.0
+    eta = seconds / finished_this_run * (total - finished) if finished_this_run else None
+    head = f"[{label}] chunk {chunk}/{chunks} | " if chunk else f"[{label}] XONG | "
+    bar = "█" * int(share * 30) + "░" * (30 - int(share * 30))
+    print(f"{head}{bar} {finished}/{total} câu ({share:.0%}) | đã chạy {seconds / 60:.1f} phút"
+          + (f" | còn ~{eta / 60:.1f} phút" if eta is not None and finished < total else ""), flush=True)
