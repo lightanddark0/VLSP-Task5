@@ -20,6 +20,7 @@ spartqa/
   voting.py               Self-consistency and weighted source voting
   inference.py            Inference jobs, fallback answers, dev scoring
   hub.py / tracking.py    Hugging Face Hub storage and W&B logging (optional)
+  symbolic/               Branch S: story/question parser and spatial reasoner
 make_splits.py            Create or rebuild Data/splits from the committed manifest
 evaluate.py               Official metrics, Final Score, and story bootstrap CIs
 validate_submission.py    Check (and optionally fill) a prediction file
@@ -29,6 +30,8 @@ train_lora.py             Branch F: Qwen3-8B LoRA fine-tuning with Hub resume
 infer_f.py                Branch F: vLLM inference with the LoRA adapter
 llm_cot.py                Branch L-CoT: Qwen3-32B-FP8 thinking + self-consistency
 ensemble.py               Dev-tuned ensemble, post-processing, submission files
+solve_symbolic.py         Branch S: rule-based answers for Auto (CPU), abstains otherwise
+compare_branches.py       Scores of each branch, each pair, and all three, from saved predictions
 run_colab.ipynb           Colab H100 notebook that runs the whole pipeline
 gpt_experiment.py         API experiment CLI, cache, exports, and configuration
 XLNER.py                  XLNet training/evaluation/prediction CLI
@@ -36,6 +39,7 @@ test_gpt_experiment.py    Mocked API and resume tests
 test_spartqa.py           Shared utilities and Git publication tests
 test_evaluation.py        Split, metric, submission, and seed tests
 test_pipeline.py          Prompt, post-processing, voting, and ensemble tests
+test_symbolic.py          Branch S parser, reasoner, and question tests (synthetic stories)
 Docs/
   spartqa_cot.txt          Versioned default prompt
   gpt_experiment.md        API experiment options and output details
@@ -199,6 +203,17 @@ and prompt version (`HF_PUBLIC_MODELS=False` sends nothing). Checkpoints, data,
 predictions, and submissions stay on Drive, since they contain the organizers'
 stories and questions. W&B receives metrics, configs, timings, and small tables
 only; runs record the adapter repo and commit hash.
+
+Branch S (`solve_symbolic.py`, section 17 of the notebook) reads a generated
+story into objects and facts, closes them under converse, symmetry,
+transitivity, block inheritance, and opposite-edge rules, and answers the four
+question types from that closure. It abstains when a story or question does
+not parse, which is the case for all Human stories (free text). On Auto dev it
+answers about 99.5% of questions, with accuracy on those of about 97.8% (YN),
+99.5% (FR), 98.1% (FB), and 99.5% (CO). `compare_branches.py` then tunes and
+scores F, S, L, every pair, and all three on dev (in-sample and 5-fold
+cross-validated over stories) and writes a submission per combination, without
+running any model.
 
 `ensemble.py` picks, per question type, the best single source or weighted vote
 on dev, applies post-processing, validates the submission structure, and writes

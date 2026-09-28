@@ -64,6 +64,8 @@ def self_consistency_curve(data: dict[str, Any], records: dict[str, dict[str, An
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model-name", default="Qwen/Qwen3-32B-FP8")
+    parser.add_argument("--fallback-model", default="Qwen/Qwen3-32B",
+                        help="Loaded if --model-name fails to start (BF16, no FP8 kernels); '' disables.")
     parser.add_argument("--source", default="LCOT")
     parser.add_argument("--n", type=int, default=8, help="Samples per question.")
     parser.add_argument("--temperature", type=float, default=0.6)
@@ -93,9 +95,19 @@ def main(argv: list[str] | None = None) -> int:
         "prompt_version": prompt_version("COT"), "seed": args.seed,
         "jobs": [{"dataset": job.dataset, "input": str(job.input), "output": str(job.output)} for job in args.job]})
 
-    llm = LLM(model=args.model_name, max_model_len=args.max_model_len,
-              gpu_memory_utilization=args.gpu_memory_utilization, max_num_seqs=args.max_num_seqs,
-              enable_prefix_caching=True, seed=args.seed)
+    def load(model: str) -> LLM:
+        return LLM(model=model, max_model_len=args.max_model_len, gpu_memory_utilization=args.gpu_memory_utilization,
+                   max_num_seqs=args.max_num_seqs, enable_prefix_caching=True, seed=args.seed)
+
+    try:
+        llm = load(args.model_name)
+    except RuntimeError as error:
+        # FP8 kernels may need a JIT compiler newer than the machine has (e.g. SM 12.x GPUs on Colab).
+        if not args.fallback_model or args.fallback_model == args.model_name:
+            raise
+        print(f"Could not start {args.model_name} ({error}); retrying with {args.fallback_model}.", flush=True)
+        tracking.update_config({"model": args.fallback_model, "model_fallback_from": args.model_name})
+        llm = load(args.fallback_model)
     tokenizer = llm.get_tokenizer()
     think_end = tokenizer.convert_tokens_to_ids("</think>")
     sampling = SamplingParams(n=args.n, temperature=args.temperature, top_p=args.top_p, top_k=args.top_k,

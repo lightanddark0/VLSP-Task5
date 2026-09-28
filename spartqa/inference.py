@@ -150,3 +150,6 @@ def configure_vllm_environment() -> None:
     """
     import os
     os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+    # DeepGEMM JIT-compiles its FP8 kernels and needs NVCC >= 12.9 on these GPUs; vLLM then uses its
+    # prebuilt FP8 kernels instead.
+    os.environ.setdefault("VLLM_USE_DEEP_GEMM", "0")
