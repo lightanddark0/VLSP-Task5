@@ -2,7 +2,7 @@
 # torch and transformers. Then the rest. After a working run, the notebook
 # saves `pip freeze` to requirements.lock.txt on the Hub for exact reinstalls.
 vllm
-# then: pip uninstall -y torchaudio  (Colab's torchaudio is built for an older CUDA than vllm's torch)
+# then: pip uninstall -y torchaudio torchao  (Colab's copies are incompatible with vllm's torch and peft)
 peft
 datasets
 accelerate
