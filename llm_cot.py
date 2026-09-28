@@ -23,8 +23,8 @@ from typing import Any
 
 from spartqa import hub, tracking
 from spartqa.data import read_json
-from spartqa.inference import (common_arguments, fallback_answers, log_report, pending, print_report,
-                               overall_progress, score_predictions, upload_predictions)
+from spartqa.inference import (common_arguments, configure_vllm_environment, fallback_answers, log_report,
+                               overall_progress, pending, print_report, score_predictions, upload_predictions)
 from spartqa.postprocess import PostprocessOptions
 from spartqa.predictions import PredictionWriter, iter_questions, payload_of, read_predictions
 from spartqa.prompting import build_cot_messages, parse_cot_answer, prompt_version, render_prompt
@@ -78,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.set_defaults(chunk_size=32)
     args = parser.parse_args(argv)
 
+    configure_vllm_environment()
     from vllm import LLM, SamplingParams
 
     smoke = bool(args.limit)

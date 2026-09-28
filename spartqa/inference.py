@@ -138,3 +138,15 @@ def overall_progress(label: str, chunk: int | None, chunks: int | None, finished
     bar = "█" * int(share * 30) + "░" * (30 - int(share * 30))
     print(f"{head}{bar} {finished}/{total} câu ({share:.0%}) | đã chạy {seconds / 60:.1f} phút"
           + (f" | còn ~{eta / 60:.1f} phút" if eta is not None and finished < total else ""), flush=True)
+
+
+def configure_vllm_environment() -> None:
+    """Environment defaults applied before importing vLLM (an explicit setting wins).
+
+    FlashInfer's top-k/top-p sampler JIT-compiles kernels for the GPU; on newer
+    GPUs (SM 12.x, e.g. RTX PRO 6000 Blackwell) it needs a CUDA toolkit >= 12.9,
+    which Colab does not have, and engine start-up fails with "FlashInfer
+    requires GPUs with sm75 or higher". vLLM's PyTorch sampler avoids the JIT.
+    """
+    import os
+    os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")

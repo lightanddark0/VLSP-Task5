@@ -20,8 +20,8 @@ from pathlib import Path
 
 from spartqa import hub, tracking
 from spartqa.data import read_json
-from spartqa.inference import (common_arguments, fallback_answers, log_report, pending, print_report,
-                               progress_bar, score_predictions, upload_predictions)
+from spartqa.inference import (common_arguments, configure_vllm_environment, fallback_answers, log_report,
+                               pending, print_report, progress_bar, score_predictions, upload_predictions)
 from spartqa.postprocess import PostprocessOptions
 from spartqa.predictions import PredictionWriter, one_hot_scores, payload_of, read_predictions
 from spartqa.prompting import build_messages, parse_answer, prompt_version, render_prompt
@@ -40,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     common_arguments(parser)
     args = parser.parse_args(argv)
 
+    configure_vllm_environment()
     from vllm import LLM, SamplingParams
     from vllm.lora.request import LoRARequest
 
