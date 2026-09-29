@@ -22,6 +22,7 @@ spartqa/
   hub.py / tracking.py    Hugging Face Hub storage and W&B logging (optional)
   symbolic/               Branch S: story/question parser and spatial reasoner
   augment.py              Converse augmentation of Human FR/YN training questions (E2)
+  lp_prompting.py         Branch LP (E3) prompts: story -> world JSON, question -> form JSON
 make_splits.py            Create or rebuild Data/splits from the committed manifest
 evaluate.py               Official metrics, Final Score, and story bootstrap CIs
 validate_submission.py    Check (and optionally fill) a prediction file
@@ -34,7 +35,10 @@ ensemble.py               Dev-tuned ensemble, post-processing, submission files
 solve_symbolic.py         Branch S: rule-based answers for Auto (CPU), abstains otherwise
 compare_branches.py       Scores of each branch, each pair, and all three, from saved predictions
 merge_predictions.py      Replace some question types of one prediction file with another's
+llm_parse.py              Branch LP (E3): Qwen3-32B writes worlds/forms as JSON, S reasoner answers
+solve_parsed.py           Branch LP (E3), CPU: re-answer saved parses, tune conventions on Human train
 run_colab_e1e2.ipynb      Colab notebook for experiments E1 (FR checklist) and E2 (converse data)
+run_colab_e3.ipynb        Colab notebook for experiment E3 (branch LP) and its comparison
 run_colab.ipynb           Colab H100 notebook that runs the whole pipeline
 gpt_experiment.py         API experiment CLI, cache, exports, and configuration
 XLNER.py                  XLNet training/evaluation/prediction CLI
@@ -227,6 +231,29 @@ Experiments E1/E2 for the Human subset (`run_colab_e1e2.ipynb`, branch
 - E2: `prepare_sft.py --augment-converse FR,YN` adds converse copies of Human
   train questions (111 FR, 29 YN) before retraining stage 2 (source F2C).
 - `compare_branches.py --branches` compares baseline, E1, E2, and E1+E2.
+
+Result on Human dev (cv): E1 did not help (Human FR 0.714 -> 0.643 in the best
+combination); E2 raised Human cv from 0.764 to 0.790 (Final cv 0.8756 -> 0.8889),
+within the noise of 116 questions but kept (source F2C).
+
+Experiment E3, branch LP (`run_colab_e3.ipynb`, branch `feat/e3-llm-parse`),
+separates reading from reasoning for Human, where the S parser cannot read
+the free text:
+- `llm_parse.py`: Qwen3-32B samples `--n-world` worlds per story (objects,
+  stated facts, edge contacts) and `--n-form` logical forms per question
+  (schema in `spartqa/symbolic/structured.py`). The S reasoner answers every
+  (world, form) pair; answers are voted, and a question with no usable pair
+  is abstained. All JSON is kept in `<output>.parses.jsonl`.
+- `solve_parsed.py --grid`: re-answers the parses under every convention
+  (closed/open YN, FR over all/any object pairs, FB scope, FAR along one
+  direction, FAR across blocks) on Human train, without the GPU, and writes
+  the best one; `--set` applies it to dev/test (source LPT).
+- Hand annotations of three Human train stories
+  (`spartqa/symbolic/lp_annotations.json`, facts only, text read from Data/)
+  are the prompt example (story 0, skipped when predicting) and an oracle test:
+  with perfect transcription the reasoner answers 39/48 questions, 42/48 with
+  FAR across blocks (FB 12/12). The rest are gold labels the text contradicts.
+- `compare_branches.py --branches "F=F2C,F1 S=S L=LCOT P=LPT"` adds LP as a branch.
 
 `ensemble.py` picks, per question type, the best single source or weighted vote
 on dev, applies post-processing, validates the submission structure, and writes

@@ -37,6 +37,10 @@ class RulesConfig:
     transitive: tuple[str, ...] = DIRECTIONS
     # Objects touching opposite edges of the same block: left edge LEFT of right edge, top ABOVE bottom.
     edge_pairs: bool = True
+    # FAR extends along one direction: X above Y and Y far above Z make X far from Z (off for Auto).
+    far_chain: bool = False
+    # Objects in different blocks are FAR from each other (a Human annotation habit; off for Auto).
+    cross_block_far: bool = False
 
 
 @dataclass
@@ -92,6 +96,11 @@ class World:
                 for x, y in product(members.get(a, []), members.get(b, [])):
                     object_facts.add((rel, x, y))
         object_facts = transitive(object_facts, self.rules.transitive, [o.id for o in self.objects])
+        if self.rules.cross_block_far:
+            object_facts |= {("FAR", x.id, y.id) for x, y in product(self.objects, self.objects)
+                             if x.block != y.block}
+        if self.rules.far_chain:
+            object_facts = far_chain(object_facts)
         self._closure = object_facts | block_facts
         self._closure_size = len(self.facts) + len(self.objects)
         return self._closure
@@ -153,6 +162,31 @@ def transitive(facts: set, rels: tuple[str, ...], nodes: list) -> set:
                     changed = True
         for a, bs in succ.items():
             facts |= {(rel, a, b) for b in bs}
+    return facts
+
+
+def far_chain(facts: set) -> set:
+    """Close FAR under "further along the same direction": d(c, a) and FAR(a, b) with d(a, b)
+    give FAR(c, b); d(a, b), FAR(a, b) and d(b, c) give FAR(a, c). Directions must be closed already."""
+    facts = set(facts)
+    lying: dict[tuple[str, object], set] = {}           # (d, y) -> every x with d(x, y)
+    for rel, x, y in facts:
+        if rel in DIRECTIONS:
+            lying.setdefault((rel, y), set()).add(x)
+    changed = True
+    while changed:
+        changed = False
+        for rel, a, b in [fact for fact in facts if fact[0] == "FAR"]:
+            for direction in DIRECTIONS:
+                if (direction, a, b) not in facts:
+                    continue
+                new = {(c, b) for c in lying.get((direction, a), ())}                 # c beyond a
+                new |= {(a, c) for c in lying.get((CONVERSE[direction], b), ())}    # c beyond b
+                for x, y in new:
+                    for fact in (("FAR", x, y), ("FAR", y, x)):
+                        if x != y and fact not in facts:
+                            facts.add(fact)
+                            changed = True
     return facts
 
 

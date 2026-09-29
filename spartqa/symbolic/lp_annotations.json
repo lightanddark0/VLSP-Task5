@@ -1,0 +1,1625 @@
+{
+ "description": "Hand-written E3 worlds and question forms for Human train stories (split file indices). Story and question text stay in Data/; story_sha256 checks that the index still points to the same story. 'expected' is the answer the reasoner should give under LPConfig() defaults (hand-derived), which differs from gold where the gold label contradicts the text or needs the cross-block FAR habit.",
+ "source": "Data/splits/human_train.json",
+ "stories": [
+  {
+   "index": 0,
+   "world": {
+    "blocks": [
+     "A",
+     "B",
+     "C"
+    ],
+    "objects": [
+     {
+      "id": "a1",
+      "block": "A",
+      "shape": "square",
+      "size": "small",
+      "color": "blue"
+     },
+     {
+      "id": "a2",
+      "block": "A",
+      "shape": "circle",
+      "size": "small",
+      "color": "blue"
+     },
+     {
+      "id": "a3",
+      "block": "A",
+      "shape": "triangle",
+      "size": "small",
+      "color": "black"
+     },
+     {
+      "id": "a4",
+      "block": "A",
+      "shape": "square",
+      "size": "medium",
+      "color": "blue"
+     },
+     {
+      "id": "a5",
+      "block": "A",
+      "shape": "circle",
+      "size": "medium",
+      "color": "black"
+     },
+     {
+      "id": "a6",
+      "block": "A",
+      "shape": "triangle",
+      "size": "medium",
+      "color": "yellow"
+     },
+     {
+      "id": "b1",
+      "block": "B",
+      "shape": "square",
+      "size": "large",
+      "color": "blue"
+     },
+     {
+      "id": "b2",
+      "block": "B",
+      "shape": "triangle",
+      "size": "large",
+      "color": "yellow"
+     },
+     {
+      "id": "b3",
+      "block": "B",
+      "shape": "triangle",
+      "size": "small",
+      "color": "yellow"
+     },
+     {
+      "id": "c1",
+      "block": "C",
+      "shape": "circle",
+      "size": "small",
+      "color": "yellow"
+     },
+     {
+      "id": "c2",
+      "block": "C",
+      "shape": "triangle",
+      "size": "small",
+      "color": "yellow"
+     },
+     {
+      "id": "c3",
+      "block": "C",
+      "shape": "triangle",
+      "size": "medium",
+      "color": "black"
+     },
+     {
+      "id": "c4",
+      "block": "C",
+      "shape": "circle",
+      "size": "large",
+      "color": "blue"
+     }
+    ],
+    "facts": [
+     [
+      "B",
+      "right",
+      "A"
+     ],
+     [
+      "C",
+      "right",
+      "B"
+     ],
+     [
+      "a1",
+      "far",
+      "a2"
+     ],
+     [
+      "a1",
+      "above",
+      "a2"
+     ],
+     [
+      "a3",
+      "far",
+      "a1"
+     ],
+     [
+      "a3",
+      "right",
+      "a1"
+     ],
+     [
+      "a3",
+      "far",
+      "a2"
+     ],
+     [
+      "a3",
+      "right",
+      "a2"
+     ],
+     [
+      "a3",
+      "near",
+      "a4"
+     ],
+     [
+      "a3",
+      "above",
+      "a4"
+     ],
+     [
+      "a4",
+      "near",
+      "a5"
+     ],
+     [
+      "a4",
+      "above",
+      "a5"
+     ],
+     [
+      "a6",
+      "near",
+      "a5"
+     ],
+     [
+      "a6",
+      "right",
+      "a5"
+     ],
+     [
+      "a6",
+      "left",
+      "a2"
+     ],
+     [
+      "b1",
+      "near",
+      "b2"
+     ],
+     [
+      "b1",
+      "left",
+      "b2"
+     ],
+     [
+      "b3",
+      "far",
+      "b1"
+     ],
+     [
+      "b3",
+      "below",
+      "b1"
+     ],
+     [
+      "c1",
+      "near",
+      "c2"
+     ],
+     [
+      "c1",
+      "above",
+      "c2"
+     ],
+     [
+      "c2",
+      "touch",
+      "c3"
+     ],
+     [
+      "c2",
+      "above",
+      "c3"
+     ],
+     [
+      "c4",
+      "far",
+      "c3"
+     ],
+     [
+      "c4",
+      "below",
+      "c3"
+     ]
+    ],
+    "edges": [
+     [
+      "a4",
+      "right"
+     ],
+     [
+      "c3",
+      "right"
+     ]
+    ]
+   },
+   "forms": {
+    "1": {
+     "subject": {
+      "color": "yellow",
+      "block": "C"
+     },
+     "quant": "all",
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "above"
+        ],
+        "quant": "a",
+        "target": {
+         "color": "blue"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "2": {
+     "subject": {
+      "size": "medium",
+      "color": "black",
+      "block": "A"
+     },
+     "quant": "the",
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "near",
+         "above"
+        ],
+        "quant": "a",
+        "target": {
+         "color": "blue"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "3": {
+     "subject": {
+      "size": "small",
+      "block": "B"
+     },
+     "quant": "the",
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "right"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "medium",
+         "block": "C"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "4": {
+     "subject": {
+      "size": "small",
+      "color": "blue"
+     },
+     "quant": "some",
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "left"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "medium",
+         "color": "black",
+         "block": "A"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "5": {
+     "condition": "has_not",
+     "object": {
+      "shape": "circle"
+     }
+    },
+    "6": {
+     "condition": "has_not",
+     "object": {
+      "shape": "square"
+     }
+    },
+    "7": {
+     "condition": "has_all",
+     "object": {
+      "color": "blue"
+     }
+    },
+    "8": {
+     "condition": "has_not",
+     "object": {
+      "edge": "any"
+     }
+    },
+    "9": {
+     "first": {
+      "size": "small",
+      "color": "blue",
+      "block": "A"
+     },
+     "second": {
+      "size": "small",
+      "color": "black",
+      "block": "A"
+     }
+    },
+    "10": {
+     "first": {
+      "size": "medium",
+      "color": "black",
+      "block": "A"
+     },
+     "second": {
+      "size": "large",
+      "color": "blue",
+      "block": "C"
+     }
+    },
+    "11": {
+     "first": {
+      "size": "large",
+      "color": "yellow"
+     },
+     "second": {
+      "size": "large",
+      "color": "blue",
+      "block": "B"
+     }
+    },
+    "12": {
+     "first": {
+      "size": "small",
+      "color": "yellow",
+      "block": "C"
+     },
+     "second": {
+      "size": "large",
+      "color": "blue",
+      "block": "C"
+     }
+    },
+    "13": {
+     "options": [
+      {
+       "shape": "triangle",
+       "size": "large",
+       "color": "yellow"
+      },
+      {
+       "shape": "triangle",
+       "size": "medium",
+       "color": "black"
+      }
+     ],
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "left"
+        ],
+        "quant": "a",
+        "target": {
+         "shape": "circle",
+         "size": "small",
+         "color": "yellow"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "14": {
+     "options": [
+      {
+       "shape": "triangle",
+       "size": "large",
+       "color": "yellow"
+      },
+      {
+       "shape": "circle",
+       "size": "small",
+       "color": "blue"
+      }
+     ],
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "left"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "medium",
+         "color": "black",
+         "block": "A"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "15": {
+     "options": [
+      {
+       "shape": "triangle",
+       "size": "small",
+       "color": "yellow"
+      },
+      {
+       "shape": "triangle",
+       "size": "large",
+       "color": "yellow"
+      }
+     ],
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "near"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "large",
+         "color": "blue",
+         "block": "B"
+        }
+       }
+      ]
+     },
+     "negated": true
+    },
+    "16": {
+     "options": [
+      {
+       "shape": "square",
+       "size": "small",
+       "color": "blue"
+      },
+      {
+       "shape": "circle",
+       "size": "medium",
+       "color": "black"
+      }
+     ],
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "right"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "large",
+         "color": "blue",
+         "block": "C"
+        }
+       }
+      ]
+     },
+     "negated": false
+    }
+   },
+   "expected": {
+    "1": [
+     "Yes"
+    ],
+    "2": [
+     "No"
+    ],
+    "3": [
+     "No"
+    ],
+    "4": [
+     "No"
+    ],
+    "5": [
+     "B"
+    ],
+    "6": [
+     "C"
+    ],
+    "7": [],
+    "8": [
+     "B"
+    ],
+    "9": [
+     0,
+     5
+    ],
+    "10": [
+     0,
+     5
+    ],
+    "11": [
+     1,
+     4
+    ],
+    "12": [
+     2,
+     5
+    ],
+    "13": [
+     0
+    ],
+    "14": [
+     3
+    ],
+    "15": [
+     0
+    ],
+    "16": [
+     3
+    ]
+   },
+   "story_sha256": "5eb84ec5185fed72"
+  },
+  {
+   "index": 1,
+   "world": {
+    "blocks": [
+     "A",
+     "B",
+     "C"
+    ],
+    "objects": [
+     {
+      "id": "a1",
+      "block": "A",
+      "shape": "triangle",
+      "size": "small",
+      "color": "black"
+     },
+     {
+      "id": "a2",
+      "block": "A",
+      "shape": "circle",
+      "size": "large",
+      "color": "blue"
+     },
+     {
+      "id": "a3",
+      "block": "A",
+      "shape": "circle",
+      "size": "small",
+      "color": "blue"
+     },
+     {
+      "id": "a4",
+      "block": "A",
+      "shape": "square",
+      "size": "small",
+      "color": "blue"
+     },
+     {
+      "id": "a5",
+      "block": "A",
+      "shape": "square",
+      "size": "medium",
+      "color": "yellow"
+     },
+     {
+      "id": "b1",
+      "block": "B",
+      "shape": "circle",
+      "size": "small",
+      "color": "yellow"
+     },
+     {
+      "id": "c1",
+      "block": "C",
+      "shape": "triangle",
+      "size": "medium",
+      "color": "black"
+     },
+     {
+      "id": "c2",
+      "block": "C",
+      "shape": "circle",
+      "size": "small",
+      "color": "yellow"
+     },
+     {
+      "id": "c3",
+      "block": "C",
+      "shape": "triangle",
+      "size": null,
+      "color": "blue"
+     },
+     {
+      "id": "c4",
+      "block": "C",
+      "shape": "square",
+      "size": "large",
+      "color": "yellow"
+     },
+     {
+      "id": "c5",
+      "block": "C",
+      "shape": "square",
+      "size": "large",
+      "color": "black"
+     }
+    ],
+    "facts": [
+     [
+      "A",
+      "left",
+      "B"
+     ],
+     [
+      "B",
+      "left",
+      "C"
+     ],
+     [
+      "a1",
+      "near",
+      "a2"
+     ],
+     [
+      "a1",
+      "left",
+      "a2"
+     ],
+     [
+      "a2",
+      "near",
+      "a3"
+     ],
+     [
+      "a2",
+      "left",
+      "a3"
+     ],
+     [
+      "a4",
+      "far",
+      "a5"
+     ],
+     [
+      "a4",
+      "below",
+      "a5"
+     ],
+     [
+      "c1",
+      "near",
+      "c2"
+     ],
+     [
+      "c1",
+      "left",
+      "c2"
+     ],
+     [
+      "c2",
+      "near",
+      "c3"
+     ],
+     [
+      "c2",
+      "left",
+      "c3"
+     ],
+     [
+      "c4",
+      "touch",
+      "c2"
+     ],
+     [
+      "c4",
+      "below",
+      "c2"
+     ],
+     [
+      "c5",
+      "near",
+      "c4"
+     ],
+     [
+      "c5",
+      "below",
+      "c4"
+     ]
+    ],
+    "edges": []
+   },
+   "forms": {
+    "1": {
+     "subject": {
+      "size": "medium",
+      "color": "black"
+     },
+     "quant": "the",
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "below"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "large",
+         "color": "black"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "2": {
+     "subject": {
+      "size": "medium",
+      "color": "yellow"
+     },
+     "quant": "the",
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "far",
+         "above"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "small",
+         "color": "blue"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "3": {
+     "subject": {
+      "size": "small",
+      "color": "blue",
+      "block": "A"
+     },
+     "quant": "the",
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "left"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "small",
+         "color": "black"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "4": {
+     "subject": {
+      "size": "small",
+      "color": "yellow",
+      "block": "C"
+     },
+     "quant": "the",
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "touch",
+         "above"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "large",
+         "color": "yellow"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "5": {
+     "condition": "has_not",
+     "object": {
+      "color": "black"
+     }
+    },
+    "6": {
+     "condition": "has_not",
+     "object": {
+      "color": "yellow"
+     }
+    },
+    "7": {
+     "condition": "has_not",
+     "object": {
+      "shape": "triangle"
+     }
+    },
+    "8": {
+     "condition": "has_all",
+     "object": {
+      "shape": "square",
+      "size": "medium"
+     }
+    },
+    "9": {
+     "first": {
+      "size": "large",
+      "color": "black"
+     },
+     "second": {
+      "size": "small",
+      "color": "yellow"
+     }
+    },
+    "10": {
+     "first": {
+      "size": "small",
+      "color": "black"
+     },
+     "second": {
+      "size": "medium",
+      "color": "black"
+     }
+    },
+    "11": {
+     "first": {
+      "size": "small",
+      "color": "yellow",
+      "block": "B"
+     },
+     "second": {
+      "size": "small",
+      "color": "yellow",
+      "block": "C"
+     }
+    },
+    "12": {
+     "first": {
+      "size": "small",
+      "color": "blue",
+      "block": "C"
+     },
+     "second": {
+      "size": "medium",
+      "color": "black"
+     }
+    },
+    "13": {
+     "options": [
+      {
+       "shape": "circle",
+       "size": "medium",
+       "color": "blue"
+      },
+      {
+       "shape": "triangle",
+       "size": "medium",
+       "color": "black"
+      }
+     ],
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "right"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "small",
+         "block": "B"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "14": {
+     "options": [
+      {
+       "shape": "square",
+       "size": "medium",
+       "color": "yellow"
+      },
+      {
+       "shape": "circle",
+       "size": "large",
+       "color": "blue"
+      }
+     ],
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "near"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "small",
+         "color": "black"
+        }
+       }
+      ]
+     },
+     "negated": true
+    },
+    "15": {
+     "options": [
+      {
+       "shape": "square",
+       "size": "large",
+       "color": "yellow"
+      },
+      {
+       "shape": "circle",
+       "size": "small",
+       "color": "yellow"
+      }
+     ],
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "above"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "large",
+         "color": "black"
+        }
+       }
+      ]
+     },
+     "negated": true
+    },
+    "16": {
+     "options": [
+      {
+       "shape": "square",
+       "size": "small",
+       "color": "blue"
+      },
+      {
+       "shape": "square",
+       "size": "large",
+       "color": "black"
+      }
+     ],
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "far"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "medium",
+         "color": "yellow"
+        }
+       }
+      ]
+     },
+     "negated": false
+    }
+   },
+   "expected": {
+    "1": [
+     "No"
+    ],
+    "2": [
+     "Yes"
+    ],
+    "3": [
+     "No"
+    ],
+    "4": [
+     "Yes"
+    ],
+    "5": [
+     "B"
+    ],
+    "6": [],
+    "7": [
+     "B"
+    ],
+    "8": [
+     "A"
+    ],
+    "9": [
+     7
+    ],
+    "10": [
+     0
+    ],
+    "11": [
+     0
+    ],
+    "12": null,
+    "13": [
+     1
+    ],
+    "14": [
+     0
+    ],
+    "15": [
+     3
+    ],
+    "16": [
+     0
+    ]
+   },
+   "story_sha256": "eb024ffe545ea6bb"
+  },
+  {
+   "index": 2,
+   "world": {
+    "blocks": [
+     "A",
+     "B",
+     "C"
+    ],
+    "objects": [
+     {
+      "id": "a1",
+      "block": "A",
+      "shape": "circle",
+      "size": "medium",
+      "color": "black"
+     },
+     {
+      "id": "a2",
+      "block": "A",
+      "shape": "square",
+      "size": "medium",
+      "color": "blue"
+     },
+     {
+      "id": "a3",
+      "block": "A",
+      "shape": "circle",
+      "size": "small",
+      "color": "yellow"
+     },
+     {
+      "id": "a4",
+      "block": "A",
+      "shape": "triangle",
+      "size": "medium",
+      "color": "yellow"
+     },
+     {
+      "id": "a5",
+      "block": "A",
+      "shape": "circle",
+      "size": "small",
+      "color": "blue"
+     },
+     {
+      "id": "b1",
+      "block": "B",
+      "shape": "square",
+      "size": "large",
+      "color": "blue"
+     },
+     {
+      "id": "b2",
+      "block": "B",
+      "shape": "triangle",
+      "size": "medium",
+      "color": "black"
+     },
+     {
+      "id": "b3",
+      "block": "B",
+      "shape": "circle",
+      "size": "large",
+      "color": "blue"
+     },
+     {
+      "id": "b4",
+      "block": "B",
+      "shape": "triangle",
+      "size": "large",
+      "color": "yellow"
+     },
+     {
+      "id": "c1",
+      "block": "C",
+      "shape": "triangle",
+      "size": "small",
+      "color": "yellow"
+     },
+     {
+      "id": "c2",
+      "block": "C",
+      "shape": "circle",
+      "size": "medium",
+      "color": "black"
+     },
+     {
+      "id": "c3",
+      "block": "C",
+      "shape": "square",
+      "size": "small",
+      "color": "blue"
+     }
+    ],
+    "facts": [
+     [
+      "A",
+      "right",
+      "B"
+     ],
+     [
+      "B",
+      "right",
+      "C"
+     ],
+     [
+      "a1",
+      "far",
+      "a2"
+     ],
+     [
+      "a1",
+      "right",
+      "a2"
+     ],
+     [
+      "a2",
+      "near",
+      "a3"
+     ],
+     [
+      "a2",
+      "right",
+      "a3"
+     ],
+     [
+      "a4",
+      "far",
+      "a2"
+     ],
+     [
+      "a4",
+      "above",
+      "a2"
+     ],
+     [
+      "a5",
+      "near",
+      "a4"
+     ],
+     [
+      "a5",
+      "above",
+      "a4"
+     ],
+     [
+      "b2",
+      "touch",
+      "b1"
+     ],
+     [
+      "b2",
+      "left",
+      "b1"
+     ],
+     [
+      "b3",
+      "near",
+      "b2"
+     ],
+     [
+      "b3",
+      "above",
+      "b2"
+     ],
+     [
+      "b4",
+      "near",
+      "b3"
+     ],
+     [
+      "b4",
+      "above",
+      "b3"
+     ],
+     [
+      "c1",
+      "near",
+      "c2"
+     ],
+     [
+      "c1",
+      "right",
+      "c2"
+     ],
+     [
+      "c3",
+      "far",
+      "c2"
+     ],
+     [
+      "c3",
+      "left",
+      "c2"
+     ]
+    ],
+    "edges": [
+     [
+      "b1",
+      "right"
+     ],
+     [
+      "c1",
+      "right"
+     ]
+    ]
+   },
+   "forms": {
+    "1": {
+     "subject": {
+      "size": "small",
+      "color": "blue",
+      "block": "A"
+     },
+     "quant": "the",
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "far",
+         "above"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "medium",
+         "color": "blue"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "2": {
+     "subject": {
+      "size": "medium",
+      "color": "black",
+      "block": "C"
+     },
+     "quant": "the",
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "near",
+         "left"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "small",
+         "color": "yellow"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "3": {
+     "subject": {
+      "size": "small",
+      "color": "yellow",
+      "block": "C"
+     },
+     "quant": "the",
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "right"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "large",
+         "color": "blue"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "4": {
+     "subject": {
+      "size": "small",
+      "color": "yellow",
+      "block": "A"
+     },
+     "quant": "the",
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "right"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "medium",
+         "color": "black"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "5": {
+     "condition": "has_not",
+     "object": {
+      "edge": "any"
+     }
+    },
+    "6": {
+     "condition": "has_not",
+     "object": {
+      "color": "yellow"
+     }
+    },
+    "7": {
+     "condition": "has_not",
+     "object": {
+      "size": "small"
+     }
+    },
+    "8": {
+     "condition": "has_all",
+     "object": {
+      "size": "large"
+     }
+    },
+    "9": {
+     "first": {
+      "size": "medium",
+      "color": "yellow"
+     },
+     "second": {
+      "size": "small",
+      "color": "blue",
+      "block": "A"
+     }
+    },
+    "10": {
+     "first": {
+      "size": "medium",
+      "color": "black",
+      "block": "C"
+     },
+     "second": {
+      "size": "medium",
+      "color": "black",
+      "block": "A"
+     }
+    },
+    "11": {
+     "first": {
+      "shape": "square",
+      "size": "large",
+      "color": "blue"
+     },
+     "second": {
+      "size": "medium",
+      "color": "black",
+      "block": "B"
+     }
+    },
+    "12": {
+     "first": {
+      "size": "medium",
+      "color": "black",
+      "block": "B"
+     },
+     "second": {
+      "shape": "circle",
+      "size": "large",
+      "color": "blue"
+     }
+    },
+    "13": {
+     "options": [
+      {
+       "shape": "circle",
+       "size": "small",
+       "color": "yellow"
+      },
+      {
+       "shape": "square",
+       "size": "small",
+       "color": "blue"
+      }
+     ],
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "right"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "large",
+         "color": "yellow"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "14": {
+     "options": [
+      {
+       "shape": "square",
+       "size": "medium",
+       "color": "blue"
+      },
+      {
+       "shape": "square",
+       "size": "large",
+       "color": "blue"
+      }
+     ],
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "near"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "medium",
+         "color": "black",
+         "block": "A"
+        }
+       }
+      ]
+     },
+     "negated": true
+    },
+    "15": {
+     "options": [
+      {
+       "shape": "circle",
+       "size": "small",
+       "color": "blue"
+      },
+      {
+       "shape": "circle",
+       "size": "small",
+       "color": "yellow"
+      }
+     ],
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "far",
+         "above"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "medium",
+         "color": "blue"
+        }
+       }
+      ]
+     },
+     "negated": false
+    },
+    "16": {
+     "options": [
+      {
+       "shape": "triangle",
+       "size": "large",
+       "color": "yellow"
+      },
+      {
+       "shape": "circle",
+       "size": "medium",
+       "color": "black"
+      }
+     ],
+     "predicate": {
+      "rels": [
+       {
+        "rel": [
+         "left"
+        ],
+        "quant": "a",
+        "target": {
+         "size": "small",
+         "color": "blue",
+         "block": "C"
+        }
+       }
+      ]
+     },
+     "negated": false
+    }
+   },
+   "expected": {
+    "1": [
+     "Yes"
+    ],
+    "2": [
+     "Yes"
+    ],
+    "3": [
+     "No"
+    ],
+    "4": [
+     "Yes"
+    ],
+    "5": [
+     "A"
+    ],
+    "6": [],
+    "7": [
+     "B"
+    ],
+    "8": [
+     "B"
+    ],
+    "9": [
+     3,
+     4
+    ],
+    "10": [
+     0,
+     5
+    ],
+    "11": [
+     1,
+     6
+    ],
+    "12": [
+     3,
+     4
+    ],
+    "13": [
+     0
+    ],
+    "14": [
+     2
+    ],
+    "15": [
+     0
+    ],
+    "16": [
+     3
+    ]
+   },
+   "story_sha256": "ee59158a2d4bcb53"
+  }
+ ]
+}
