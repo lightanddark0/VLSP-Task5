@@ -273,6 +273,12 @@ E4 (`run_colab_e4.ipynb`, branch `feat/e4-lp-crossfit`):
   `compare_branches.py --tune-splits human=trdev` tunes and cross-validates
   ensembles on train + dev instead of 116 dev questions.
 
+Result (Human cv, ensembles tuned on train + dev, 613 questions): F+S+L 0.795,
++LP 0.836, +LPX 0.846 (Final cv 0.8910 / 0.9115 / 0.9165). LPX chose
+`forms_mode=rule_plus` and `world_merge=both`; the FR near/far table did not
+help out of fold and is off. Per type with LPX: YN 0.857, FR 0.785, FB 0.922,
+CO 0.819. F2C held-out folds range 0.63-0.79, so 7-story dev scores are noisy.
+
 `ensemble.py` picks, per question type, the best single source or weighted vote
 on dev, applies post-processing, validates the submission structure, and writes
 an ablation table. Two flags are decisions for the organizers' rules:
