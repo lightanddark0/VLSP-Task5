@@ -1,9 +1,12 @@
 """Local CLI for Qwen3-VL-8B-Instruct QLoRA SFT on ViSPARTQA (YN/FR/FB/CO).
 
 Subcommands: manifest, audit, inspect-modules, train-stage-a, train-stage-b,
-evaluate, predict. Heavy ML imports are deferred into each command so --help
-and syntax checks stay usable without torch/transformers/peft/bitsandbytes
-installed, matching gpt_experiment.py's lazy-import convention.
+evaluate, predict (single-agent, end-to-end); distill-graphs, train-agent-extraction,
+train-agent-reasoning, evaluate-pipeline, predict-pipeline (two-agent: an extraction
+agent producing structured facts, then a reasoning agent answering with them).
+Heavy ML imports are deferred into each command so --help and syntax checks stay
+usable without torch/transformers/peft/bitsandbytes installed, matching
+gpt_experiment.py's lazy-import convention.
 
 See Docs/qwen_qlora.md for the full command sequence, budget notes and
 unverified assumptions to check before spending GPU time.
@@ -100,6 +103,41 @@ def command_predict(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_distill_graphs(args: argparse.Namespace) -> int:
+    from spartqa.qwen_train import run_distill_graphs
+
+    run_distill_graphs(args)
+    return 0
+
+
+def command_train_agent_extraction(args: argparse.Namespace) -> int:
+    from spartqa.qwen_train import run_train_agent_extraction
+
+    run_train_agent_extraction(args)
+    return 0
+
+
+def command_train_agent_reasoning(args: argparse.Namespace) -> int:
+    from spartqa.qwen_train import run_train_agent_reasoning
+
+    run_train_agent_reasoning(args)
+    return 0
+
+
+def command_evaluate_pipeline(args: argparse.Namespace) -> int:
+    from spartqa.qwen_train import run_evaluate_pipeline
+
+    run_evaluate_pipeline(args)
+    return 0
+
+
+def command_predict_pipeline(args: argparse.Namespace) -> int:
+    from spartqa.qwen_train import run_predict_pipeline
+
+    run_predict_pipeline(args)
+    return 0
+
+
 def _add_common_train_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--human", type=Path, default=ROOT / "Data/human_train.json")
@@ -173,6 +211,67 @@ def build_parser() -> argparse.ArgumentParser:
     predict_parser.add_argument("--max-questions", type=int, help="Timing pilot only: produces an incomplete file, not a valid submission.")
     predict_parser.add_argument("--output", type=Path, required=True)
     predict_parser.set_defaults(handler=command_predict)
+
+    distill_parser = subparsers.add_parser(
+        "distill-graphs",
+        help="Convert a completed `gpt_experiment.py --method pot` run's responses.jsonl into a compact graphs.json for agent training.",
+    )
+    distill_parser.add_argument("--pot-log", type=Path, required=True, help="responses.jsonl from a gpt_experiment.py --method pot/pot-no-path run.")
+    distill_parser.add_argument("--source", choices=("human", "auto"), required=True, help="Which manifest source this pot-log's --input matched; re-keys graphs to match qwen_data.py's source-qualified keys.")
+    distill_parser.add_argument("--output", type=Path, default=ROOT / "outputs/qwen_qlora/graphs.json")
+    distill_parser.set_defaults(handler=command_distill_graphs)
+
+    agent_extraction_parser = subparsers.add_parser(
+        "train-agent-extraction", help="Agent 1: story+question -> structured facts JSON, distilled from GPT.",
+    )
+    _add_common_train_args(agent_extraction_parser)
+    agent_extraction_parser.add_argument("--graphs", type=Path, required=True, help="graphs.json produced by distill-graphs.")
+    agent_extraction_parser.add_argument("--max-examples", type=int, help="Cap the number of TRAIN examples with a distilled graph.")
+    agent_extraction_parser.add_argument("--learning-rate", type=float, default=1e-4)
+    agent_extraction_parser.set_defaults(handler=command_train_agent_extraction)
+
+    agent_reasoning_parser = subparsers.add_parser(
+        "train-agent-reasoning", help="Agent 2: story+question[+facts] -> answer JSON.",
+    )
+    _add_common_train_args(agent_reasoning_parser)
+    agent_reasoning_parser.add_argument(
+        "--graphs", type=Path,
+        help="graphs.json produced by distill-graphs; TRAIN examples without an entry train the no-facts fallback.",
+    )
+    agent_reasoning_parser.add_argument("--human-passes", type=float, default=3.0)
+    agent_reasoning_parser.add_argument("--learning-rate", type=float, default=3e-5)
+    agent_reasoning_parser.set_defaults(handler=command_train_agent_reasoning)
+
+    evaluate_pipeline_parser = subparsers.add_parser(
+        "evaluate-pipeline", help="Two-agent (extraction -> reasoning) constrained-decoding evaluation on the manifest validation split.",
+    )
+    evaluate_pipeline_parser.add_argument("--manifest", type=Path, required=True)
+    evaluate_pipeline_parser.add_argument("--human", type=Path, default=ROOT / "Data/human_train.json")
+    evaluate_pipeline_parser.add_argument("--auto", type=Path, default=ROOT / "Data/auto_train.json")
+    evaluate_pipeline_parser.add_argument("--model-id", default="Qwen/Qwen3-VL-8B-Instruct")
+    evaluate_pipeline_parser.add_argument("--extraction-adapter", type=Path, required=True)
+    evaluate_pipeline_parser.add_argument("--reasoning-adapter", type=Path, required=True)
+    evaluate_pipeline_parser.add_argument("--baseline-metrics", type=Path, help="Prior metrics.json to apply the regression gate against.")
+    evaluate_pipeline_parser.add_argument("--graph-max-new-tokens", type=int, default=512)
+    evaluate_pipeline_parser.add_argument("--answer-max-new-tokens", type=int, default=64)
+    evaluate_pipeline_parser.add_argument("--batch-size", type=int, default=4)
+    evaluate_pipeline_parser.add_argument("--max-questions", type=int, help="Cap per source (human/auto) for a timing pilot; omit for the full validation split.")
+    evaluate_pipeline_parser.add_argument("--output", type=Path, required=True)
+    evaluate_pipeline_parser.set_defaults(handler=command_evaluate_pipeline)
+
+    predict_pipeline_parser = subparsers.add_parser(
+        "predict-pipeline", help="Two-agent (extraction -> reasoning) prediction for an unlabeled public-test JSON file.",
+    )
+    predict_pipeline_parser.add_argument("--input", type=Path, required=True)
+    predict_pipeline_parser.add_argument("--model-id", default="Qwen/Qwen3-VL-8B-Instruct")
+    predict_pipeline_parser.add_argument("--extraction-adapter", type=Path, required=True)
+    predict_pipeline_parser.add_argument("--reasoning-adapter", type=Path, required=True)
+    predict_pipeline_parser.add_argument("--graph-max-new-tokens", type=int, default=512)
+    predict_pipeline_parser.add_argument("--answer-max-new-tokens", type=int, default=64)
+    predict_pipeline_parser.add_argument("--batch-size", type=int, default=4)
+    predict_pipeline_parser.add_argument("--max-questions", type=int, help="Timing pilot only: produces an incomplete file, not a valid submission.")
+    predict_pipeline_parser.add_argument("--output", type=Path, required=True)
+    predict_pipeline_parser.set_defaults(handler=command_predict_pipeline)
 
     return parser
 

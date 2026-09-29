@@ -249,8 +249,100 @@ container before relying on them:
 
 ## Excluded from this round
 
-GPT rationale generation or distillation, PoT/graph pipeline changes, image
-rendering or vision training, GRPO/DPO, four independent per-task adapters,
-multi-GPU, fixing the existing XLNet baseline, retraining on the full
-combined dataset after validation, and broad hyperparameter sweeps. See the
-planning notes for the full phased rationale and GPU budget derivation.
+GRPO/DPO, four independent per-task adapters, multi-GPU, fixing the existing
+XLNet baseline, retraining on the full combined dataset after validation, and
+broad hyperparameter sweeps. See the planning notes for the full phased
+rationale and GPU budget derivation. GPT-distilled extraction and a two-agent
+pipeline, originally excluded from this round, are covered below.
+
+## Two-agent pipeline: extraction agent + reasoning agent
+
+An alternative to the single end-to-end model above: **Agent 1** reads the
+story+question and emits a structured facts JSON (`entities`, `triples`,
+`query.source`/`query.target`) using PoT's relation vocabulary
+(`spartqa/pot.py::RELATIONS`); **Agent 2** reads the story+question plus
+Agent 1's facts and answers, using the exact same answer contract
+(`legal_answers`/`canonical_answer`/constrained decoding) as the single-agent
+path. Each agent is ONE independent QLoRA adapter trained with ONE training
+run — no stage A/B curriculum inside either agent, to keep this at 2 trained
+steps total. Prompt/target contracts live in `spartqa/agent_data.py`
+(dependency-free, offline-tested); orchestration is in the same
+`spartqa/qwen_train.py`/`qwen_finetune.py`/`modal_app.py` files as the
+single-agent path, as new subcommands/entrypoints alongside the existing ones
+(nothing above was removed or changed).
+
+Agent 1 has no gold label in `Data/` — its training target is **distilled
+from GPT**: reuse the existing `gpt_experiment.py --method pot` run
+unmodified (no code changes needed there) to produce a `responses.jsonl` full
+of GPT-generated graphs, then convert it with `distill-graphs`.
+
+```powershell
+# 1. Distill Agent 1's training target from GPT (local machine, needs OPENAI_API_KEY; no GPU).
+#    Human train only is recommended first, to control API cost; add --max-questions for a pilot.
+#    --extract-only skips every reasoning call (this step only needs the graphs); extraction is
+#    also deduped per story within the run, so cost scales with unique stories, not questions.
+python gpt_experiment.py --input Data/human_train.json --method pot --extract-only --output-dir outputs/gpt_pot_distill_human_train
+python qwen_finetune.py distill-graphs --pot-log outputs/gpt_pot_distill_human_train/responses.jsonl --source human --output outputs/qwen_qlora/graphs.json
+```
+
+`--source` must match whichever manifest source (`human`/`auto`) the pot
+run's `--input` file corresponds to: `gpt_experiment.py` keys its graphs
+`story_index:question_index` (no source), while `qwen_data.py`'s examples key
+`source:story_index:question_index` — `distill-graphs` re-keys to line these
+up. Running `distill-graphs` again with the other `--source` and the same
+`--output` merges into one `graphs.json` instead of overwriting it.
+
+```powershell
+# 2. Train each agent (GPU; one run each, no curriculum stages).
+python qwen_finetune.py train-agent-extraction --manifest outputs/qwen_qlora/manifest.json --graphs outputs/qwen_qlora/graphs.json --output-dir outputs/qwen_qlora/agent_extraction --max-steps 400
+python qwen_finetune.py train-agent-reasoning --manifest outputs/qwen_qlora/manifest.json --graphs outputs/qwen_qlora/graphs.json --output-dir outputs/qwen_qlora/agent_reasoning --max-steps 400
+
+# 3. Evaluate/predict by chaining both adapters on one loaded base model.
+python qwen_finetune.py evaluate-pipeline --manifest outputs/qwen_qlora/manifest.json --extraction-adapter outputs/qwen_qlora/agent_extraction/adapter --reasoning-adapter outputs/qwen_qlora/agent_reasoning/adapter --output outputs/qwen_qlora/metrics_pipeline.json --baseline-metrics outputs/qwen_qlora/metrics_base.json
+python qwen_finetune.py predict-pipeline --input Data/human_public_test.json --extraction-adapter outputs/qwen_qlora/agent_extraction/adapter --reasoning-adapter outputs/qwen_qlora/agent_reasoning/adapter --output outputs/qwen_qlora/human_public_test_predictions.json
+```
+
+Matching `modal_app.py` local_entrypoints: `distill_graphs` (CPU-only — it
+only parses an already-produced `responses.jsonl`, no OpenAI calls run on
+Modal), `train_agent_extraction`, `train_agent_reasoning`,
+`evaluate_pipeline`, `predict_pipeline`. Same `--root-dir` convention as the
+other entrypoints.
+
+Design notes and simplifications versus `spartqa/pot.py`'s own GPT-side
+pipeline:
+
+- Agent 1's schema drops PoT's `query.pairs`/`query.focus` (path-search-only
+  fields); Agent 2 reasons over the full entity/triple set in one shot
+  (`spartqa/agent_data.py::canonical_graph`), it does not do local path
+  search like `spartqa/pot.py::identify_query_paths`.
+- Agent 1's generation is free-form text (not JSON-schema constrained like
+  the OpenAI calls), parsed with `spartqa/qwen_eval.py::parse_graph_prediction`;
+  a failed/unparsable extraction yields `graph=None`, and Agent 2's prompt
+  falls back to the plain single-agent contract for that question
+  (`spartqa/agent_data.py::build_reasoning_user_content`).
+- `train-agent-reasoning --graphs` is optional and, when given, only covers
+  the TRAIN examples present in `graphs.json` (typically Human only, if only
+  Human was distilled) — the remaining schedule trains the `graph=None`
+  fallback path directly, so Agent 2 sees both regimes during training,
+  matching what it will see at inference time whenever Agent 1's extraction
+  fails to parse.
+
+### Unverified assumptions specific to the two-agent pipeline
+
+None of this has been executed either. In addition to every base-model
+caveat above (they all still apply — same base model, same quantization):
+
+- Agent 1's free-form JSON generation has no constrained decoding, so its
+  actual parse/valid-schema rate on real output is unmeasured; `parsed` in
+  `evaluate-pipeline`'s `graph_extraction` report is the first signal to
+  check before trusting any pipeline metric.
+- Loading both adapters on one `PeftModel` via `adapter_name=` +
+  `set_adapter()` (`spartqa/qwen_train.py::_load_pipeline_model`) is the
+  documented PEFT multi-adapter pattern, but has not been run against this
+  specific quantized base model; if adapter switching misbehaves, the
+  fallback is two fully separate model loads (more GPU memory, no code
+  change needed beyond removing the adapter-name coupling).
+- Whether appending Agent 1's facts actually improves over the single-agent
+  baseline is unestablished — `evaluate-pipeline --baseline-metrics` against
+  the existing `metrics_stage_b.json` (or `metrics_base.json`) is the
+  intended comparison before adopting this path over the single-agent one.

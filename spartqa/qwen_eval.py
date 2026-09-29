@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from spartqa.agent_data import build_extraction_prompt_messages, build_reasoning_prompt_messages, canonical_graph
 from spartqa.data import validate_answer
 from spartqa.metrics import finalize_metrics, update_metric_state
 from spartqa.qwen_data import build_prompt_messages, legal_answers
@@ -99,6 +100,80 @@ def parse_prediction(text: str, payload: dict[str, Any]) -> list[Any] | None:
     except (json.JSONDecodeError, KeyError, ValueError, TypeError):
         return None
     return answer
+
+
+def parse_graph_prediction(text: str) -> dict[str, Any] | None:
+    try:
+        return canonical_graph(json.loads(text))
+    except (json.JSONDecodeError, ValueError, KeyError, TypeError):
+        return None
+
+
+def generate_graphs(
+    model, processor, examples: list[dict[str, Any]], max_new_tokens: int = 512, batch_size: int = 4,
+) -> dict[str, dict[str, Any] | None]:
+    """Agent 1 free-form generation (no constrained decoding: graphs are not a small enumerable set)."""
+    import torch
+
+    graphs: dict[str, dict[str, Any] | None] = {}
+    for start in range(0, len(examples), batch_size):
+        batch = examples[start:start + batch_size]
+        rendered = [
+            processor.apply_chat_template(
+                build_extraction_prompt_messages(example["payload"]), tokenize=False, add_generation_prompt=True,
+            )
+            for example in batch
+        ]
+        encoded = processor.tokenizer(rendered, return_tensors="pt", padding=True, add_special_tokens=False)
+        encoded = {key: value.to(model.device) for key, value in encoded.items()}
+        prompt_length = encoded["input_ids"].shape[1]
+        with torch.no_grad():
+            generated = model.generate(
+                **encoded, max_new_tokens=max_new_tokens, do_sample=False,
+                pad_token_id=processor.tokenizer.pad_token_id,
+            )
+        for row, example in enumerate(batch):
+            completion_ids = generated[row, prompt_length:]
+            text = processor.tokenizer.decode(completion_ids, skip_special_tokens=True)
+            graphs[example["key"]] = parse_graph_prediction(text)
+    return graphs
+
+
+def generate_predictions_with_graphs(
+    model, processor, examples: list[dict[str, Any]], graphs: dict[str, dict[str, Any] | None],
+    max_new_tokens: int = 64, batch_size: int = 4,
+) -> dict[str, list[Any] | None]:
+    """Agent 2 constrained generation, same legal-answer trie as generate_predictions but with
+    each example's Agent-1-extracted facts (or None, on a failed/missing extraction) in the prompt.
+    """
+    import torch
+
+    predictions: dict[str, list[Any] | None] = {}
+    for start in range(0, len(examples), batch_size):
+        batch = examples[start:start + batch_size]
+        rendered = [
+            processor.apply_chat_template(
+                build_reasoning_prompt_messages(example["payload"], graphs.get(example["key"])),
+                tokenize=False, add_generation_prompt=True,
+            )
+            for example in batch
+        ]
+        encoded = processor.tokenizer(rendered, return_tensors="pt", padding=True, add_special_tokens=False)
+        encoded = {key: value.to(model.device) for key, value in encoded.items()}
+        prompt_length = encoded["input_ids"].shape[1]
+        prefix_fn = build_prefix_allowed_tokens_fn(
+            processor, [prompt_length] * len(batch), [example["payload"] for example in batch],
+        )
+        with torch.no_grad():
+            generated = model.generate(
+                **encoded, max_new_tokens=max_new_tokens, do_sample=False,
+                prefix_allowed_tokens_fn=prefix_fn, pad_token_id=processor.tokenizer.pad_token_id,
+            )
+        for row, example in enumerate(batch):
+            completion_ids = generated[row, prompt_length:]
+            text = processor.tokenizer.decode(completion_ids, skip_special_tokens=True)
+            predictions[example["key"]] = parse_prediction(text, example["payload"])
+    return predictions
 
 
 def evaluate_examples(predictions: dict[str, list[Any] | None], examples: list[dict[str, Any]]) -> dict[str, Any]:

@@ -237,3 +237,104 @@ def predict(
         "--batch-size", str(batch_size),
     ]
     print(f"predict exit_code={run_cli_gpu.remote(argv, output_dir)}")
+
+
+# Two-agent (extraction -> reasoning) pipeline. distill_graphs is CPU-only: it just
+# parses a `gpt_experiment.py --method pot` responses.jsonl already produced/uploaded
+# to the Volume; the API calls themselves are not run on Modal.
+@app.local_entrypoint()
+def distill_graphs(pot_log: str, source: str, root_dir: str = VOLUME_PATH, output_name: str = "graphs.json") -> None:
+    output_dir = _output_dir(root_dir)
+    argv = ["distill-graphs", "--pot-log", pot_log, "--source", source, "--output", f"{output_dir}/{output_name}"]
+    print(f"distill-graphs exit_code={run_cli_cpu.remote(argv, output_dir)}")
+
+
+@app.local_entrypoint()
+def train_agent_extraction(
+    max_steps: int, root_dir: str = VOLUME_PATH, graphs: str | None = None, max_examples: int | None = None,
+    micro_batch_size: int = 4, gradient_accumulation_steps: int = 8, learning_rate: float = 1e-4, seed: int = 42,
+) -> None:
+    data_dir, output_dir = _data_dir(root_dir), _output_dir(root_dir)
+    argv = [
+        "train-agent-extraction",
+        "--manifest", f"{output_dir}/manifest.json",
+        "--human", f"{data_dir}/human_train.json",
+        "--auto", f"{data_dir}/auto_train.json",
+        "--output-dir", f"{output_dir}/agent_extraction",
+        "--graphs", graphs or f"{output_dir}/graphs.json",
+        "--max-steps", str(max_steps),
+        "--micro-batch-size", str(micro_batch_size),
+        "--gradient-accumulation-steps", str(gradient_accumulation_steps),
+        "--learning-rate", str(learning_rate),
+        "--seed", str(seed),
+    ]
+    if max_examples is not None:
+        argv += ["--max-examples", str(max_examples)]
+    print(f"train-agent-extraction exit_code={run_cli_gpu.remote(argv, output_dir)}")
+
+
+@app.local_entrypoint()
+def train_agent_reasoning(
+    max_steps: int, root_dir: str = VOLUME_PATH, graphs: str | None = None, human_passes: float = 3.0,
+    micro_batch_size: int = 4, gradient_accumulation_steps: int = 8, learning_rate: float = 3e-5, seed: int = 42,
+) -> None:
+    data_dir, output_dir = _data_dir(root_dir), _output_dir(root_dir)
+    argv = [
+        "train-agent-reasoning",
+        "--manifest", f"{output_dir}/manifest.json",
+        "--human", f"{data_dir}/human_train.json",
+        "--auto", f"{data_dir}/auto_train.json",
+        "--output-dir", f"{output_dir}/agent_reasoning",
+        "--graphs", graphs or f"{output_dir}/graphs.json",
+        "--human-passes", str(human_passes),
+        "--max-steps", str(max_steps),
+        "--micro-batch-size", str(micro_batch_size),
+        "--gradient-accumulation-steps", str(gradient_accumulation_steps),
+        "--learning-rate", str(learning_rate),
+        "--seed", str(seed),
+    ]
+    print(f"train-agent-reasoning exit_code={run_cli_gpu.remote(argv, output_dir)}")
+
+
+@app.local_entrypoint()
+def evaluate_pipeline(
+    root_dir: str = VOLUME_PATH, extraction_adapter: str | None = None, reasoning_adapter: str | None = None,
+    baseline_metrics: str | None = None, output_name: str = "metrics_pipeline.json",
+    graph_max_new_tokens: int = 512, answer_max_new_tokens: int = 64, batch_size: int = 4,
+) -> None:
+    data_dir, output_dir = _data_dir(root_dir), _output_dir(root_dir)
+    argv = [
+        "evaluate-pipeline",
+        "--manifest", f"{output_dir}/manifest.json",
+        "--human", f"{data_dir}/human_train.json",
+        "--auto", f"{data_dir}/auto_train.json",
+        "--extraction-adapter", extraction_adapter or f"{output_dir}/agent_extraction/adapter",
+        "--reasoning-adapter", reasoning_adapter or f"{output_dir}/agent_reasoning/adapter",
+        "--output", f"{output_dir}/{output_name}",
+        "--graph-max-new-tokens", str(graph_max_new_tokens),
+        "--answer-max-new-tokens", str(answer_max_new_tokens),
+        "--batch-size", str(batch_size),
+    ]
+    if baseline_metrics:
+        argv += ["--baseline-metrics", baseline_metrics]
+    print(f"evaluate-pipeline exit_code={run_cli_gpu.remote(argv, output_dir)}")
+
+
+@app.local_entrypoint()
+def predict_pipeline(
+    input_path: str, output_name: str, root_dir: str = VOLUME_PATH, extraction_adapter: str | None = None,
+    reasoning_adapter: str | None = None, graph_max_new_tokens: int = 512, answer_max_new_tokens: int = 64,
+    batch_size: int = 4,
+) -> None:
+    output_dir = _output_dir(root_dir)
+    argv = [
+        "predict-pipeline",
+        "--input", input_path,
+        "--extraction-adapter", extraction_adapter or f"{output_dir}/agent_extraction/adapter",
+        "--reasoning-adapter", reasoning_adapter or f"{output_dir}/agent_reasoning/adapter",
+        "--output", f"{output_dir}/{output_name}",
+        "--graph-max-new-tokens", str(graph_max_new_tokens),
+        "--answer-max-new-tokens", str(answer_max_new_tokens),
+        "--batch-size", str(batch_size),
+    ]
+    print(f"predict-pipeline exit_code={run_cli_gpu.remote(argv, output_dir)}")

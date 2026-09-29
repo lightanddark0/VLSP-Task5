@@ -8,6 +8,11 @@ from __future__ import annotations
 import random
 from typing import Any
 
+from spartqa.agent_data import (
+    build_extraction_prompt_messages,
+    build_reasoning_prompt_messages,
+    graph_completion_text,
+)
 from spartqa.qwen_data import build_prompt_messages, completion_text
 
 IGNORE_INDEX = -100
@@ -24,24 +29,43 @@ def _chat_template_ids(processor, messages: list[dict[str, Any]], add_generation
     return list(input_ids)
 
 
-def encode_example(processor, example: dict[str, Any]) -> dict[str, Any]:
+def _encode(processor, key: str, prompt_messages: list[dict[str, Any]], completion: str) -> dict[str, Any]:
     """Tokenizes prompt+completion; supervises only the assistant completion tokens plus EOS."""
-    messages = build_prompt_messages(example["payload"])
-    prompt_ids = _chat_template_ids(processor, messages, add_generation_prompt=True)
-    completion = completion_text(example["gold"], example["payload"])
-    full_messages = messages + [{"role": "assistant", "content": [{"type": "text", "text": completion}]}]
+    prompt_ids = _chat_template_ids(processor, prompt_messages, add_generation_prompt=True)
+    full_messages = prompt_messages + [{"role": "assistant", "content": [{"type": "text", "text": completion}]}]
     full_ids = _chat_template_ids(processor, full_messages, add_generation_prompt=False)
     if full_ids[: len(prompt_ids)] != prompt_ids:
         raise ValueError(
-            f"Chat template prefix mismatch for key {example['key']!r}; cannot mask reliably. "
+            f"Chat template prefix mismatch for key {key!r}; cannot mask reliably. "
             "Verify the processor's chat template keeps a stable prompt prefix before assistant content."
         )
     labels = [IGNORE_INDEX] * len(prompt_ids) + list(full_ids[len(prompt_ids):])
     if len(labels) != len(full_ids):
         raise ValueError("Label/length mismatch while masking prompt tokens")
     if not any(label != IGNORE_INDEX for label in labels):
-        raise ValueError(f"No supervised completion tokens for key {example['key']!r}")
-    return {"key": example["key"], "input_ids": list(full_ids), "labels": labels}
+        raise ValueError(f"No supervised completion tokens for key {key!r}")
+    return {"key": key, "input_ids": list(full_ids), "labels": labels}
+
+
+def encode_example(processor, example: dict[str, Any]) -> dict[str, Any]:
+    """Single-agent contract: story+question -> answer JSON directly."""
+    messages = build_prompt_messages(example["payload"])
+    completion = completion_text(example["gold"], example["payload"])
+    return _encode(processor, example["key"], messages, completion)
+
+
+def encode_extraction_example(processor, example: dict[str, Any], graph: dict[str, Any]) -> dict[str, Any]:
+    """Agent 1 contract: story+question -> structured facts JSON, target distilled from GPT."""
+    messages = build_extraction_prompt_messages(example["payload"])
+    completion = graph_completion_text(graph)
+    return _encode(processor, example["key"], messages, completion)
+
+
+def encode_reasoning_example(processor, example: dict[str, Any], graph: dict[str, Any] | None) -> dict[str, Any]:
+    """Agent 2 contract: story+question[+facts] -> answer JSON; graph=None trains the no-facts fallback."""
+    messages = build_reasoning_prompt_messages(example["payload"], graph)
+    completion = completion_text(example["gold"], example["payload"])
+    return _encode(processor, example["key"], messages, completion)
 
 
 class SpartQATokenizedDataset:

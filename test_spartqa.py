@@ -7,6 +7,14 @@ from pathlib import Path
 
 from spartqa.data import read_json, validate_answer, write_json
 from spartqa.metrics import answer_matches, finalize_metrics, set_jaccard, update_metric_state
+from spartqa.agent_data import (
+    build_extraction_prompt_messages,
+    build_reasoning_prompt_messages,
+    canonical_graph,
+    format_graph_facts,
+    graph_completion_text,
+    graphs_from_pot_log,
+)
 from spartqa.qwen_data import (
     assign_splits,
     build_manifest,
@@ -173,6 +181,59 @@ class QwenDataContractTests(unittest.TestCase):
             self.assertEqual(first["sources"]["human"]["count"], 1)
 
 
+SAMPLE_GRAPH = {
+    "entities": [{"id": "b", "description": "khối B"}, {"id": "a", "description": "khối A"}],
+    "triples": [{"head": "a", "relation": "left", "tail": "b"}],
+    "query": {"source": "a", "target": "b", "pairs": [{"source": "a", "target": "b"}], "focus": ["a", "b"]},
+}
+
+
+class AgentDataContractTests(unittest.TestCase):
+    def test_canonical_graph_sorts_entities_and_drops_path_search_only_query_fields(self):
+        canonical = canonical_graph(SAMPLE_GRAPH)
+        self.assertEqual([entity["id"] for entity in canonical["entities"]], ["a", "b"])
+        self.assertEqual(canonical["query"], {"source": "a", "target": "b"})
+        self.assertNotIn("pairs", canonical["query"])
+        self.assertEqual(json.loads(graph_completion_text(SAMPLE_GRAPH)), canonical)
+
+    def test_canonical_graph_rejects_invalid_input(self):
+        with self.assertRaises(ValueError):
+            canonical_graph({"entities": [], "triples": []})
+
+    def test_graphs_from_pot_log_keeps_only_valid_extract_stage_graphs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "responses.jsonl"
+            lines = [
+                {"key": "human:0:0", "stage": "extract", "result": {"graph": SAMPLE_GRAPH}},
+                {"key": "human:0:1", "stage": "extract", "result": {"error": "InvalidGraph"}},
+                {"key": "human:0:2", "stage": "reason:joint", "result": {"answer": ["Yes"]}},
+                {"key": "human:0:0", "answer": ["Yes"]},
+            ]
+            log_path.write_text("\n".join(json.dumps(line, ensure_ascii=False) for line in lines) + "\n", encoding="utf-8")
+            graphs = graphs_from_pot_log(log_path)
+        self.assertEqual(set(graphs), {"human:0:0"})
+        self.assertEqual(graphs["human:0:0"]["query"], {"source": "a", "target": "b"})
+
+    def test_format_graph_facts_lists_entities_triples_and_focus(self):
+        text = format_graph_facts(SAMPLE_GRAPH)
+        self.assertIn("a: khối A", text)
+        self.assertIn("a --left--> b", text)
+        self.assertIn("source=a, target=b", text)
+
+    def test_reasoning_prompt_falls_back_to_plain_contract_without_a_graph(self):
+        payload = {"story": ["Câu chuyện."], "question": "Hỏi?", "q_type": "YN", "candidate_answers": []}
+        without_graph = build_reasoning_prompt_messages(payload, None)[1]["content"][0]["text"]
+        with_graph = build_reasoning_prompt_messages(payload, SAMPLE_GRAPH)[1]["content"][0]["text"]
+        self.assertNotIn("Dữ kiện trích xuất:", without_graph)
+        self.assertIn("Dữ kiện trích xuất:", with_graph)
+
+    def test_extraction_prompt_names_the_relation_vocabulary(self):
+        payload = {"story": ["Câu chuyện."], "question": "Hỏi?", "q_type": "YN", "candidate_answers": []}
+        rendered = json.dumps(build_extraction_prompt_messages(payload), ensure_ascii=False)
+        self.assertIn("touch", rendered)
+        self.assertIn("entities", rendered)
+
+
 @unittest.skipUnless(shutil.which("git"), "Git is needed to validate publication rules")
 class PublicationTests(unittest.TestCase):
     def test_gitignore_excludes_private_artifacts_but_keeps_source(self):
@@ -187,6 +248,7 @@ class PublicationTests(unittest.TestCase):
             ".env.example", ".gitignore", "readme.md", "gpt_experiment.py", "XLNER.py",
             "spartqa/api.py", "spartqa/data.py", "spartqa/metrics.py", "spartqa/qwen_data.py",
             "spartqa/qwen_model.py", "spartqa/qwen_dataset.py", "spartqa/qwen_eval.py", "spartqa/qwen_train.py",
+            "spartqa/agent_data.py", "spartqa/pot.py",
             "qwen_finetune.py", "modal_app.py", "requirements-qlora.txt", "requirements-modal.txt",
             "Docs/qwen_qlora.md", "test_spartqa.py",
             "test_gpt_experiment.py", "Data/README.md", "Docs/spartqa_cot.txt",
