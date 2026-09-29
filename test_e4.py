@@ -106,6 +106,9 @@ class CalibrationTests(unittest.TestCase):
         calibrated = solve_all(data, worlds, forms, LPConfig(), calibration=table)
         self.assertEqual((plain["0_1"]["answer"], calibrated["0_1"]["answer"]), ([0], [0, 5]))
         self.assertEqual(oof_calibrated(data, worlds, forms, LPConfig(), 3, "LP")["0_1"]["answer"], [0, 5])
+        # an "unsupported" form (parsed as None) must be skipped, not crash the fit
+        forms["0_1"] = forms["0_1"] + [{"unsupported": True}]
+        self.assertEqual(fit_fr_calibration(data, worlds, forms, LPConfig())["cross|dir|-|-"]["5"], 1.0)
 
 
 class CrossfitTests(unittest.TestCase):

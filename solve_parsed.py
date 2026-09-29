@@ -143,12 +143,14 @@ def fit_fr_calibration(data: dict[str, Any], worlds: dict[int, list[Any]], forms
         if stories is not None and story not in stories:
             continue
         keys = []
-        for solver, form in itertools.product(build_solvers(worlds[story], config),
-                                              question_forms(forms[key], question, config)):
-            pairs = solver.fr_pairs(form)
-            if pairs:
-                labels = solver.fr(form, question) or []
-                keys.append(solver.fr_key(labels, pairs))
+        usable = [form for form in question_forms(forms[key], question, config) if form is not None]
+        for solver, form in itertools.product(build_solvers(worlds[story], config), usable):
+            try:
+                pairs = solver.fr_pairs(form)
+                if pairs:
+                    keys.append(solver.fr_key(solver.fr(form, question) or [], pairs))
+            except (StructureError, KeyError, TypeError, IndexError):
+                continue
         for situation in keys:
             entry = totals.setdefault(situation, {"n": 0.0, "4": 0.0, "5": 0.0})
             entry["n"] += 1 / len(keys)
