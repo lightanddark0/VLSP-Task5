@@ -107,9 +107,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--submission-names", default="human=human_submission.json,auto=auto_submission.json")
     parser.add_argument("--branches", default="F=F2,F1 S=S L=LCOT",
                         help="Sources of each branch, e.g. 'F=F2C,F1 S=S L=LCOTX' (experiments E1/E2).")
+    parser.add_argument("--tune-splits", default="human=dev,auto=dev",
+                        help="Labeled split tuned and cross-validated on per dataset, e.g. human=trdev "
+                             "(Data/splits/human_trdev.json and <source>/human_trdev.jsonl, made by crossfit.py).")
     parser.add_argument("--run-name")
     args = parser.parse_args(argv)
     branches = parse_branches(args.branches)
+    tune_splits = {"human": "dev", "auto": "dev", **dict(item.split("=", 1) for item in args.tune_splits.split(","))}
     priority = priority_of(branches)
 
     options = PostprocessOptions(use_indifinite=args.use_indifinite, human_yn_dk=args.human_yn_dk)
@@ -122,16 +126,17 @@ def main(argv: list[str] | None = None) -> int:
 
     results: dict[str, dict[str, Any]] = {"+".join(c): {} for c in combos}
     for dataset in args.datasets:
-        dev_data = read_json(args.splits_dir / f"{dataset}_dev.json")
+        split = tune_splits[dataset]
+        dev_data = read_json(args.splits_dir / f"{dataset}_{split}.json")
         test_data = read_json(args.data_dir / f"{dataset}_public_test.json")
         fallback = fallback_answers(args.splits_dir, dataset)
         available = {}
         for source in priority:
-            dev_path = args.pred_dir / source / f"{dataset}_dev.jsonl"
+            dev_path = args.pred_dir / source / f"{dataset}_{split}.jsonl"
             test_path = args.pred_dir / source / f"{dataset}_test.jsonl"
             if dev_path.exists() and test_path.exists():
                 available[source] = (read_predictions(dev_path), read_predictions(test_path))
-        print(f"== {dataset}: sources with dev+test predictions: {list(available) or 'none'}")
+        print(f"== {dataset}: tuned on {split}; sources with {split}+test predictions: {list(available) or 'none'}")
         questions = [(key, q) for key, _, q in iter_questions(dev_data) if "answer" in q]
         for combo in combos:
             name = "+".join(combo)

@@ -18,6 +18,7 @@ dist/
 *.safetensors
 /Data/*.json
 /Data/splits/*
+/Data/crossfit/
 !/Data/splits/manifest.json
 /Docs/*.pdf
 

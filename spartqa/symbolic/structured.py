@@ -54,6 +54,11 @@ class LPConfig:
     fb_scope: str = "global"         # clause targets anywhere ("global") or in the candidate block ("block")
     far_chain: bool = True
     cross_block_far: bool = False
+    relax: str = "none"              # nothing matches a description: drop "size", then "size_color"
+    definite: str = "any"            # YN "the" subject / CO option matching several objects: "any" or "all"
+    fr_block_share: bool = False     # FR "X và Y trong C": X without a block takes Y's block if it matches there
+    world_merge: str = "none"        # sampled worlds: "none", fact-level "merged" world only, or "both"
+    forms_mode: str = "llm"          # "llm", "rule_first" (rule form, else LLM), "rule_plus" (rule form + LLM)
 
     def rules(self) -> RulesConfig:
         return RulesConfig(far_chain=self.far_chain, cross_block_far=self.cross_block_far)
@@ -190,16 +195,24 @@ def parse_form(data: Any, task: str) -> dict[str, Any] | None:
 
 
 class LPSolver:
-    def __init__(self, world: World, config: LPConfig | None = None) -> None:
+    def __init__(self, world: World, config: LPConfig | None = None,
+                 calibration: dict[str, dict[str, float]] | None = None) -> None:
         self.world = world
         self.config = config or LPConfig()
+        self.calibration = calibration
+        self._strict: World | None = None
 
     def match(self, desc: Description, within: str | None = None) -> set[int]:
-        world = self.world
-        found = {o.id for o in world.objects
-                 if all(getattr(desc, name) is None or getattr(o, name) == getattr(desc, name) for name in ATTRIBUTES)
-                 and (desc.block is None or o.block == desc.block) and (within is None or o.block == within)}
-        return {x for x in found if self.satisfies(x, desc, within)}
+        dropped = {"none": [()], "size": [(), ("size",)], "size_color": [(), ("size",), ("size", "color")]}
+        for ignore in dropped[self.config.relax]:
+            found = {o.id for o in self.world.objects
+                     if all(name in ignore or getattr(desc, name) is None or getattr(o, name) == getattr(desc, name)
+                            for name in ATTRIBUTES)
+                     and (desc.block is None or o.block == desc.block) and (within is None or o.block == within)}
+            found = {x for x in found if self.satisfies(x, desc, within)}
+            if found:
+                return found
+        return set()
 
     def satisfies(self, x: int, desc: Description, within: str | None = None) -> bool:
         if desc.block is not None and self.world.objects[x].block != desc.block:
@@ -237,7 +250,8 @@ class LPSolver:
         if not xs:
             return None
         results = [self.satisfies(x, form["predicate"]) for x in xs]
-        truth = all(results) if form["quant"] == "all" else any(results)
+        every = form["quant"] == "all" or (form["quant"] == "the" and self.config.definite == "all")
+        truth = all(results) if every else any(results)
         if form["negated"]:
             truth = not truth
         if truth:
@@ -249,13 +263,48 @@ class LPSolver:
         return ["No"]
 
     def fr(self, form: dict[str, Any], question: dict[str, Any]) -> list[int] | None:
-        xs, ys = self.match(form["first"]), self.match(form["second"])
-        pairs = [(x, y) for x, y in product(xs, ys) if x != y]
+        pairs = self.fr_pairs(form)
         if not pairs:
             return None
         check = all if self.config.fr_multi == "all" else any
         labels = [index for rel, index in FR_INDEX.items() if check(self.world.holds(rel, x, y) for x, y in pairs)]
+        if self.calibration is not None:
+            labels = self.calibrate(labels, pairs)
         return labels or [7]
+
+    def fr_pairs(self, form: dict[str, Any]) -> list[tuple[int, int]]:
+        first, second = form["first"], form["second"]
+        xs, ys = self.match(first), self.match(second)
+        if self.config.fr_block_share and first.block is None and second.block is not None:
+            shared = {x for x in xs if self.world.objects[x].block == second.block}
+            xs = shared or xs
+        return [(x, y) for x, y in product(xs, ys) if x != y]
+
+    # --- C1: Human near/far habits learned from train -------------------------------------------
+    def strict_world(self) -> World:
+        """The same facts closed without the optional FAR rules."""
+        if self._strict is None:
+            world = self.world
+            self._strict = World(blocks=list(world.blocks), objects=world.objects, facts=set(world.facts),
+                                 edges=set(world.edges), rules=RulesConfig())
+        return self._strict
+
+    def fr_key(self, labels: list[int], pairs: list[tuple[int, int]]) -> str:
+        blocks = {self.world.objects[x].block == self.world.objects[y].block for x, y in pairs}
+        strict = self.strict_world()
+        near = all(strict.holds("NEAR", x, y) for x, y in pairs)
+        far_stated = all(strict.holds("FAR", x, y) for x, y in pairs)
+        return "|".join([{frozenset({True}): "same", frozenset({False}): "cross"}.get(frozenset(blocks), "mixed"),
+                         "dir" if any(label < 4 for label in labels) else "nodir",
+                         "near" if near else "-", "far" if far_stated else ("farrule" if 5 in labels else "-")])
+
+    def calibrate(self, labels: list[int], pairs: list[tuple[int, int]]) -> list[int]:
+        entry = self.calibration.get(self.fr_key(labels, pairs))
+        if not entry:
+            return labels
+        result = [label for label in labels if label not in (4, 5)]
+        result += [label for label in (4, 5) if entry[str(label)] >= 0.5]
+        return sorted(result)
 
     def fb(self, form: dict[str, Any], question: dict[str, Any]) -> list[str]:
         blocks = list(question["candidate_answers"])
@@ -271,11 +320,55 @@ class LPSolver:
 
     def co(self, form: dict[str, Any], question: dict[str, Any]) -> list[int]:
         satisfied = []
+        check = all if self.config.definite == "all" else any
         for option in form["options"]:
             xs = self.match(option)
-            truth = any(self.satisfies(x, form["predicate"]) for x in xs)
+            truth = check(self.satisfies(x, form["predicate"]) for x in xs)
             satisfied.append(bool(xs) and (truth != form["negated"]))
         return [{(True, False): 0, (False, True): 1, (True, True): 2, (False, False): 3}[tuple(satisfied)]]
+
+
+def merge_worlds(worlds: list[Any]) -> dict[str, Any] | None:
+    """D1: one world keeping the objects, facts, and edges found in at least half of the usable samples.
+
+    Objects are aligned across samples by (block, shape, size, color, occurrence), since ids differ."""
+    usable = []
+    for world in worlds:
+        try:
+            world_from_json(world)
+        except (StructureError, KeyError, TypeError):
+            continue
+        usable.append(world)
+    if len(usable) < 2:
+        return None
+    need = (len(usable) + 1) // 2
+    counts: dict[str, dict[Any, int]] = {"objects": {}, "facts": {}, "edges": {}, "blocks": {}}
+    for world in usable:
+        signature, seen = {}, {}
+        for item in world["objects"]:
+            core = tuple(_text(item.get(name), name) for name in ATTRIBUTES)
+            key = (_block(item["block"]),) + core
+            seen[key] = seen.get(key, 0) + 1
+            signature[item["id"]] = key + (seen[key],)
+
+        def node(name: Any) -> Any:
+            return signature.get(name, name.strip().upper() if isinstance(name, str) else name)
+
+        items = {"objects": set(signature.values()), "blocks": {_block(b) for b in world.get("blocks") or []},
+                 "facts": {(node(a), rel, node(b)) for a, rel, b in world.get("facts") or []},
+                 "edges": {(node(obj), side) for obj, side in world.get("edges") or []}}
+        for kind, values in items.items():
+            for value in values:
+                counts[kind][value] = counts[kind].get(value, 0) + 1
+    keep = {kind: [value for value, count in values.items() if count >= need] for kind, values in counts.items()}
+    ids = {sig: f"o{index}" for index, sig in enumerate(sorted(keep["objects"], key=str))}
+    objects = [{"id": ids[sig], "block": sig[0], "shape": sig[1], "size": sig[2], "color": sig[3]}
+               for sig in sorted(keep["objects"], key=str)]
+    ref = lambda node: ids.get(node, node if isinstance(node, str) else None)  # noqa: E731
+    facts = [[ref(a), rel, ref(b)] for a, rel, b in keep["facts"] if ref(a) is not None and ref(b) is not None]
+    edges = [[ids[obj], side] for obj, side in keep["edges"] if obj in ids]
+    blocks = sorted(set(keep["blocks"]) | {o["block"] for o in objects})
+    return {"blocks": blocks, "objects": objects, "facts": sorted(facts), "edges": sorted(edges)} if objects else None
 
 
 def solve(world_json: Any, form_json: Any, question: dict[str, Any], config: LPConfig) -> list[Any] | None:
@@ -288,4 +381,4 @@ def solve(world_json: Any, form_json: Any, question: dict[str, Any], config: LPC
         return None
 
 
-__all__ = ["LPConfig", "LPSolver", "StructureError", "parse_form", "solve", "world_from_json"]
+__all__ = ["LPConfig", "LPSolver", "StructureError", "merge_worlds", "parse_form", "solve", "world_from_json"]

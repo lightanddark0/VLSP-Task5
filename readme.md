@@ -37,8 +37,10 @@ compare_branches.py       Scores of each branch, each pair, and all three, from 
 merge_predictions.py      Replace some question types of one prediction file with another's
 llm_parse.py              Branch LP (E3): Qwen3-32B writes worlds/forms as JSON, S reasoner answers
 solve_parsed.py           Branch LP (E3), CPU: re-answer saved parses, tune conventions on Human train
+crossfit.py               A1: story folds of Human train, out-of-fold merge, train+dev tuning split
 run_colab_e1e2.ipynb      Colab notebook for experiments E1 (FR checklist) and E2 (converse data)
 run_colab_e3.ipynb        Colab notebook for experiment E3 (branch LP) and its comparison
+run_colab_e4.ipynb        Colab notebook for E4: LP+ (CPU) and F2C cross-fit, ensembles tuned on 613 Human questions
 run_colab.ipynb           Colab H100 notebook that runs the whole pipeline
 gpt_experiment.py         API experiment CLI, cache, exports, and configuration
 XLNER.py                  XLNet training/evaluation/prediction CLI
@@ -254,6 +256,22 @@ the free text:
   with perfect transcription the reasoner answers 39/48 questions, 42/48 with
   FAR across blocks (FB 12/12). The rest are gold labels the text contradicts.
 - `compare_branches.py --branches "F=F2C,F1 S=S L=LCOT P=LPT"` adds LP as a branch.
+
+Result (Human dev cv): LP alone 0.790 (FB 0.931); F+S+L+P 0.850 against 0.790
+without LP, Final cv 0.8889 -> 0.9185.
+
+E4 (`run_colab_e4.ipynb`, branch `feat/e4-lp-crossfit`):
+- LP+ on CPU from the saved E3 parses (`solve_parsed.py`): rule-based forms for
+  the common Human question shapes (`spartqa/symbolic/human_forms.py`, 84% of
+  Human questions; `forms_mode`), relaxed matching (`relax`), `definite`,
+  `fr_block_share`, fact-level merging of sampled worlds (`world_merge`), and a
+  learned FR near/far table (`--fit-fr-calibration`, scored out of fold with
+  `--oof-calibration`). Switches are chosen on Human train; the result is source LPX.
+- A1: `crossfit.py` makes story folds of Human train; F2C is retrained per fold
+  and predicts its held-out stories, F1 and L also predict Human train, and
+  `crossfit.py combine` builds `human_trdev` (613 questions) so
+  `compare_branches.py --tune-splits human=trdev` tunes and cross-validates
+  ensembles on train + dev instead of 116 dev questions.
 
 `ensemble.py` picks, per question type, the best single source or weighted vote
 on dev, applies post-processing, validates the submission structure, and writes
