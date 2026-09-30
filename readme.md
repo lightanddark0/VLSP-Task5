@@ -38,9 +38,12 @@ merge_predictions.py      Replace some question types of one prediction file wit
 llm_parse.py              Branch LP (E3): Qwen3-32B writes worlds/forms as JSON, S reasoner answers
 solve_parsed.py           Branch LP (E3), CPU: re-answer saved parses, tune conventions on Human train
 crossfit.py               A1: story folds of Human train, out-of-fold merge, train+dev tuning split
+analyze_errors.py         Human error analysis on out-of-fold predictions (recoverable errors, FR kinds, LP causes)
+stack_ensemble.py         Stacking: per-type logistic regression over source confidences, same folds as cv
 run_colab_e1e2.ipynb      Colab notebook for experiments E1 (FR checklist) and E2 (converse data)
 run_colab_e3.ipynb        Colab notebook for experiment E3 (branch LP) and its comparison
 run_colab_e4.ipynb        Colab notebook for E4: LP+ (CPU) and F2C cross-fit, ensembles tuned on 613 Human questions
+run_analysis_e5.ipynb     CPU notebook: error analysis and stacking on the E4 predictions
 run_colab.ipynb           Colab H100 notebook that runs the whole pipeline
 gpt_experiment.py         API experiment CLI, cache, exports, and configuration
 XLNER.py                  XLNet training/evaluation/prediction CLI
