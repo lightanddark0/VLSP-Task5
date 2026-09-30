@@ -24,7 +24,7 @@ from typing import Any
 
 from compare_branches import tune
 from ensemble import predict
-from spartqa.analysis import GRID, THRESHOLDS, load_setup, oof_ensemble, story_folds, story_of
+from spartqa.analysis import GRID, THRESHOLDS, group_of, load_setup, oof_ensemble, story_folds, story_of
 from spartqa.data import TASKS, read_json, write_json
 from spartqa.metrics import PRIMARY_METRIC, answer_matches
 from spartqa.postprocess import EMPTY, PostprocessOptions, finalize_answer
@@ -134,6 +134,38 @@ def oof_stacked(questions, sources, names, dataset, options, fallback, c: float)
     return answers
 
 
+def nested_hybrid(questions, sources, names, dataset, options, fallback, c_grid: list[float]) -> dict[str, list[Any]]:
+    """Per type, weighted or stacked (and C) chosen by an inner cv on each outer training part only."""
+    fold_of = story_folds(questions)
+    answers = {}
+    for fold in sorted(set(fold_of.values())):
+        train = [(k, q) for k, q in questions if fold_of[story_of(k)] != fold]
+        held = [(k, q) for k, q in questions if fold_of[story_of(k)] == fold]
+        candidates_ = {"weighted": per_type(train, oof_ensemble(train, sources, names, dataset, options, fallback))}
+        for c in c_grid:
+            candidates_[c] = per_type(train, oof_stacked(train, sources, names, dataset, options, fallback, c))
+        choice = {t: max(candidates_, key=lambda name: (candidates_[name].get(t, 0), name == "weighted"))
+                  for t in TASKS}
+        configs = tune(train, sources, names, dataset, options, fallback, GRID, THRESHOLDS)
+        models = {c: fit_models(train, sources, names, c) for c in set(choice.values()) if c != "weighted"}
+        for key, q in held:
+            method = choice[q["q_type"]]
+            answers[key] = (predict(key, q, sources, configs[q["q_type"]], dataset, options, fallback)
+                            if method == "weighted" else
+                            stacked_answer(models[method], key, q, sources, names, dataset, options, fallback))
+    return answers
+
+
+def group_means(questions, answers) -> dict[str, float]:
+    """Mean primary metric over the four types, within each question batch (A: reasoning_type given, B: not)."""
+    means = {}
+    for group in ("A", "B"):
+        subset = [(k, q) for k, q in questions if group_of(q) == group]
+        if subset:
+            means[group] = mean(per_type(subset, answers))
+    return means
+
+
 def per_type(questions, answers) -> dict[str, float]:
     scores = {}
     for task in TASKS:
@@ -156,37 +188,47 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--branches", default="F=F2C,F1 S=S L=LCOT P=LPX")
     parser.add_argument("--c-grid", default="0.1,1,10")
     parser.add_argument("--human-yn-dk", choices=("keep", "no"), default="keep")
+    parser.add_argument("--human-fr-dk", choices=("keep", "avoid"), default="keep",
+                        help="avoid: Human FR [7] becomes the relations some source scored.")
     parser.add_argument("--auto-submission", type=Path, help="Copied next to the new Human file for a complete pair.")
     parser.add_argument("--auto-cv", type=float, default=0.9873, help="Auto cv, only to print Final = (Human + Auto) / 2.")
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/stacking"))
     args = parser.parse_args(argv)
 
-    options = PostprocessOptions(human_yn_dk=args.human_yn_dk)
+    options = PostprocessOptions(human_yn_dk=args.human_yn_dk, human_fr_dk=args.human_fr_dk)
     setup = load_setup(args.pred_dir, args.splits_dir, args.split, args.branches)
     questions, sources, names = setup["questions"], setup["sources"], setup["names"]
     dataset, fallback = setup["dataset"], setup["fallback"]
     print(f"{len(questions)} labeled questions; sources {names}")
 
-    weighted = per_type(questions, oof_ensemble(questions, sources, names, dataset, options, fallback))
-    results = {"weighted": weighted}
-    for c in [float(v) for v in args.c_grid.split(",")]:
-        results[f"stack C={c:g}"] = per_type(questions, oof_stacked(questions, sources, names, dataset, options, fallback, c))
-    best_c_name = max((n for n in results if n.startswith("stack")), key=lambda n: mean(results[n]))
+    c_grid = [float(v) for v in args.c_grid.split(",")]
+    all_answers = {"weighted": oof_ensemble(questions, sources, names, dataset, options, fallback)}
+    for c in c_grid:
+        all_answers[f"stack C={c:g}"] = oof_stacked(questions, sources, names, dataset, options, fallback, c)
+    all_answers["hybrid nested"] = nested_hybrid(questions, sources, names, dataset, options, fallback, c_grid)
+    results = {name: per_type(questions, answers) for name, answers in all_answers.items()}
+    groups = {name: group_means(questions, answers) for name, answers in all_answers.items()}
+    weighted = results["weighted"]
+    best_c_name = max((n for n in results if n.startswith("stack C")), key=lambda n: mean(results[n]))
     best_c = float(best_c_name.split("=")[1])
     hybrid_choice = {t: "stack" if results[best_c_name][t] > weighted[t] else "weighted" for t in weighted}
-    results["hybrid"] = {t: max(results[best_c_name][t], weighted[t]) for t in weighted}
+    results["hybrid (chọn trên cùng fold, lạc quan)"] = {t: max(results[best_c_name][t], weighted[t]) for t in weighted}
 
-    lines = ["| Cách gộp | " + " | ".join(TASKS) + " | **Human cv** | Final cv |", "|---|" + "---|" * (len(TASKS) + 2)]
+    lines = ["| Cách gộp | " + " | ".join(TASKS) + " | **Human cv** | Nhóm A | Nhóm B | Final cv |",
+             "|---|" + "---|" * (len(TASKS) + 4)]
     for name, scores in results.items():
+        group = groups.get(name, {})
         lines.append(f"| {name} | " + " | ".join(f"{scores.get(t, 0):.3f}" for t in TASKS)
-                     + f" | **{mean(scores):.4f}** | {(mean(scores) + args.auto_cv) / 2:.4f} |")
+                     + f" | **{mean(scores):.4f}** | {group.get('A', float('nan')):.3f} | {group.get('B', float('nan')):.3f}"
+                     + f" | {(mean(scores) + args.auto_cv) / 2:.4f} |")
     report = "\n".join(lines) + (f"\n\nC tốt nhất: {best_c:g}. Hybrid chọn theo loại câu: {hybrid_choice} "
                                   "(lạc quan hơn một chút vì chọn trên cùng các fold).\n")
     print(report)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "report.md").write_text("# Stacking so với ensemble trọng số (cv theo story)\n\n" + report,
                                               encoding="utf-8")
-    write_json(args.output_dir / "results.json", {"results": results, "best_c": best_c, "hybrid": hybrid_choice,
+    write_json(args.output_dir / "results.json", {"results": results, "groups": groups, "best_c": best_c,
+                                                  "hybrid": hybrid_choice,
                                                   "sources": names, "metric": PRIMARY_METRIC})
 
     # Refit on the whole split and answer the public test

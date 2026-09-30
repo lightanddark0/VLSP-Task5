@@ -44,6 +44,7 @@ run_colab_e1e2.ipynb      Colab notebook for experiments E1 (FR checklist) and E
 run_colab_e3.ipynb        Colab notebook for experiment E3 (branch LP) and its comparison
 run_colab_e4.ipynb        Colab notebook for E4: LP+ (CPU) and F2C cross-fit, ensembles tuned on 613 Human questions
 run_analysis_e5.ipynb     CPU notebook: error analysis and stacking on the E4 predictions
+run_colab_e6.ipynb        E6: FR DK fix, nested stacking, group A/B scores, LP re-sampling of unreadable worlds
 run_colab.ipynb           Colab H100 notebook that runs the whole pipeline
 gpt_experiment.py         API experiment CLI, cache, exports, and configuration
 XLNER.py                  XLNet training/evaluation/prediction CLI

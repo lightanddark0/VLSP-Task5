@@ -37,7 +37,8 @@ from spartqa.symbolic.lexicon import FR_INDEX, OPPOSITE
 from spartqa.symbolic.world import Obj, RulesConfig, World
 
 RELATIONS = {"left": "LEFT", "right": "RIGHT", "above": "ABOVE", "below": "BELOW",
-             "near": "NEAR", "far": "FAR", "touch": "TOUCH"}
+             "near": "NEAR", "far": "FAR", "touch": "TOUCH", "between": "BETWEEN"}
+FACT_RELATIONS = {name for name in RELATIONS if name != "between"}   # "between" only appears in questions
 SIDES = ("left", "right", "top", "bottom")
 ATTRIBUTES = ("shape", "size", "color")
 
@@ -59,6 +60,8 @@ class LPConfig:
     fr_block_share: bool = False     # FR "X và Y trong C": X without a block takes Y's block if it matches there
     world_merge: str = "none"        # sampled worlds: "none", fact-level "merged" world only, or "both"
     forms_mode: str = "llm"          # "llm", "rule_first" (rule form, else LLM), "rule_plus" (rule form + LLM)
+    fr_unknown: str = "dk"           # FR pair with no provable relation: answer [7] ("dk") or abstain
+    lenient: bool = False            # drop malformed objects/facts/edges instead of rejecting the whole world
 
     def rules(self) -> RulesConfig:
         return RulesConfig(far_chain=self.far_chain, cross_block_far=self.cross_block_far)
@@ -82,21 +85,38 @@ def _block(value: Any) -> str:
     return value.strip().upper()
 
 
-def world_from_json(data: Any, rules: RulesConfig | None = None) -> World:
+def world_from_json(data: Any, rules: RulesConfig | None = None, lenient: bool = False) -> World:
+    """World from LLM JSON. Strict mode rejects any malformed part; lenient mode drops it and keeps the rest."""
     if not isinstance(data, dict):
         raise StructureError("world must be an object")
+
+    def keep(check) -> bool:
+        try:
+            check()
+            return True
+        except (StructureError, KeyError, TypeError, AttributeError):
+            if not lenient:
+                raise
+            return False
+
     world = World(rules=rules or RulesConfig())
-    world.blocks = [_block(name) for name in data.get("blocks") or []]
+    for name in data.get("blocks") or []:
+        if keep(lambda: _block(name)) and _block(name) not in world.blocks:
+            world.blocks.append(_block(name))
     ids: dict[str, int] = {}
-    for item in data.get("objects") or []:
+
+    def add_object(item: Any) -> None:
         if not isinstance(item, dict) or not isinstance(item.get("id"), str) or item["id"] in ids:
             raise StructureError("each object needs a unique string id")
         block = _block(item.get("block"))
+        attributes = [_text(item.get(name), name) for name in ATTRIBUTES]
         if block not in world.blocks:
             world.blocks.append(block)
         ids[item["id"]] = len(world.objects)
-        world.objects.append(Obj(len(world.objects), block, _text(item.get("shape"), "shape"),
-                                 _text(item.get("size"), "size"), _text(item.get("color"), "color")))
+        world.objects.append(Obj(len(world.objects), block, *attributes))
+
+    for item in data.get("objects") or []:
+        keep(lambda: add_object(item))
 
     def node(name: Any) -> int | str:
         if isinstance(name, str) and name in ids:
@@ -105,20 +125,26 @@ def world_from_json(data: Any, rules: RulesConfig | None = None) -> World:
             return name.strip().upper()
         raise StructureError(f"unknown object or block {name!r}")
 
-    for fact in data.get("facts") or []:
-        if not isinstance(fact, list) or len(fact) != 3 or fact[1] not in RELATIONS:
+    def add_fact(fact: Any) -> None:
+        if not isinstance(fact, list) or len(fact) != 3 or fact[1] not in FACT_RELATIONS:
             raise StructureError(f"bad fact {fact!r}")
         a, b = node(fact[0]), node(fact[2])
         if isinstance(a, str) != isinstance(b, str):
             raise StructureError("a fact must link two objects or two blocks")
         world.add_fact(RELATIONS[fact[1]], a, b)
-    for edge in data.get("edges") or []:
+
+    def add_edge(edge: Any) -> None:
         if not isinstance(edge, list) or len(edge) != 2 or edge[1] not in SIDES:
             raise StructureError(f"bad edge {edge!r}")
         target = node(edge[0])
         if isinstance(target, str):
             raise StructureError("an edge contact needs an object")
         world.edges.add((target, edge[1]))
+
+    for fact in data.get("facts") or []:
+        keep(lambda: add_fact(fact))
+    for edge in data.get("edges") or []:
+        keep(lambda: add_edge(edge))
     if not world.objects:
         raise StructureError("world without objects")
     return world
@@ -224,8 +250,17 @@ class LPSolver:
         return all(self.related(x, rels, self.match(target, within), quant)
                    for rels, quant, target in desc.rels or [])
 
+    def between(self, x: int, targets: set[int]) -> bool:
+        """x lies strictly between two targets on the horizontal or the vertical axis."""
+        holds = self.world.holds
+        return any(holds("LEFT", y, x) and holds("LEFT", x, z) or holds("ABOVE", y, x) and holds("ABOVE", x, z)
+                   for y in targets for z in targets if y != z)
+
     def related(self, x: int, rels: tuple[str, ...], targets: set[int], quant: str) -> bool:
         targets = targets - {x}
+        if "BETWEEN" in rels:
+            others = tuple(rel for rel in rels if rel != "BETWEEN")
+            return self.between(x, targets) and (not others or self.related(x, others, targets, quant))
         if not targets:
             return False
         check = all if quant == "all" else any
@@ -270,6 +305,8 @@ class LPSolver:
         labels = [index for rel, index in FR_INDEX.items() if check(self.world.holds(rel, x, y) for x, y in pairs)]
         if self.calibration is not None:
             labels = self.calibrate(labels, pairs)
+        if not labels and self.config.fr_unknown == "abstain":
+            return None
         return labels or [7]
 
     def fr_pairs(self, form: dict[str, Any]) -> list[tuple[int, int]]:
@@ -374,7 +411,7 @@ def merge_worlds(worlds: list[Any]) -> dict[str, Any] | None:
 def solve(world_json: Any, form_json: Any, question: dict[str, Any], config: LPConfig) -> list[Any] | None:
     """One sampled world and one sampled form -> answer, or None if either is unusable."""
     try:
-        world = world_from_json(world_json, config.rules())
+        world = world_from_json(world_json, config.rules(), config.lenient)
         form = parse_form(form_json, question["q_type"])
         return LPSolver(world, config).answer(form, question)
     except (StructureError, KeyError, TypeError, IndexError):

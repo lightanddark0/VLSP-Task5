@@ -22,7 +22,8 @@ from collections import defaultdict
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from solve_parsed import answer_question, parse_setting, read_parses
+from solve_parsed import answer_question, parse_setting, read_parses, world_report
+from spartqa.predictions import iter_questions
 from spartqa import hub, tracking
 from spartqa.data import read_json
 from spartqa.inference import (common_arguments, configure_vllm_environment, fallback_answers, log_report,
@@ -52,6 +53,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-think-forms", action="store_true", help="Parse questions without thinking (faster).")
     parser.add_argument("--examples", type=int, default=1, help="Annotated stories shown as worked examples.")
     parser.add_argument("--examples-data", type=Path, help="Data file of the annotations (default: their source).")
+    parser.add_argument("--redo-worlds-below", type=int, default=0, metavar="K",
+                        help="Sample new worlds (added to the saved ones) for stories with fewer than K strictly "
+                             "readable worlds, and answer their questions again.")
     parser.add_argument("--set", type=parse_setting, action="append", default=[], metavar="NAME=VALUE",
                         help="Answering convention (see solve_parsed.py), e.g. cross_block_far=true.")
     common_arguments(parser)
@@ -99,6 +103,16 @@ def main(argv: list[str] | None = None) -> int:
         parses_path = job.output.with_suffix(".parses.jsonl")
         worlds, forms = read_parses(parses_path)
         todo, done = pending(data, job.output, args.limit)
+        previous: dict[int, list] = {}
+        if args.redo_worlds_below:
+            weak = {story for story, _, strict, _ in world_report(worlds)[0] if strict < args.redo_worlds_below}
+            weak |= {int(key.split("_")[0]) for key, _, _ in iter_questions(data)} - set(worlds)
+            queued = {entry[0] for entry in todo}
+            todo += [entry for entry in iter_questions(data)
+                     if int(entry[0].split("_")[0]) in weak and entry[0] not in queued]
+            for story in weak & set(worlds):
+                previous[story] = worlds.pop(story)
+            print(f"[{job.dataset}/{job.split}] re-sampling worlds for {len(weak)} stories: {sorted(weak)}")
         skipped = [entry for entry in todo if story_sha(entry[1]["story"]) in example_shas]
         todo = [entry for entry in todo if story_sha(entry[1]["story"]) not in example_shas]
         by_story: dict[int, list] = defaultdict(list)
@@ -136,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
                 values = [None if sample.finish_reason == "length" else extract_json(sample.text)
                           for sample in output.outputs]
                 if kind == "world":
+                    values = previous.get(ident, []) + values
                     worlds[ident] = values
                     stats["worlds"] += len(values)
                     stats["bad_worlds"] += sum(value is None for value in values)

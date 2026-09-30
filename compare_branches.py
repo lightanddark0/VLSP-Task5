@@ -104,6 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--thresholds", default="0.4,0.5,0.6")
     parser.add_argument("--use-indifinite", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--human-yn-dk", choices=("keep", "no"), default="keep")
+    parser.add_argument("--human-fr-dk", choices=("keep", "avoid"), default="keep",
+                        help="avoid: Human FR [7] becomes the relations some source scored.")
     parser.add_argument("--submission-names", default="human=human_submission.json,auto=auto_submission.json")
     parser.add_argument("--branches", default="F=F2,F1 S=S L=LCOT",
                         help="Sources of each branch, e.g. 'F=F2C,F1 S=S L=LCOTX' (experiments E1/E2).")
@@ -116,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     tune_splits = {"human": "dev", "auto": "dev", **dict(item.split("=", 1) for item in args.tune_splits.split(","))}
     priority = priority_of(branches)
 
-    options = PostprocessOptions(use_indifinite=args.use_indifinite, human_yn_dk=args.human_yn_dk)
+    options = PostprocessOptions(use_indifinite=args.use_indifinite, human_yn_dk=args.human_yn_dk, human_fr_dk=args.human_fr_dk)
     grid = [float(v) for v in args.weights.split(",")]
     thresholds = [float(v) for v in args.thresholds.split(",")]
     submission_names = dict(item.split("=", 1) for item in args.submission_names.split(","))

@@ -43,3 +43,4 @@ jobs:
           python solve_parsed.py --help
           python crossfit.py --help
           python analyze_errors.py --help
+          python stack_ensemble.py --help

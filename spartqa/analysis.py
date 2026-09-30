@@ -22,6 +22,12 @@ GRID = [0.0, 1.0, 2.0]
 THRESHOLDS = [0.4, 0.5, 0.6]
 
 
+def group_of(question: dict[str, Any]) -> str:
+    """Human questions come in two batches: "A" with reasoning_type annotated, "B" without (only for reporting)."""
+    kinds = question.get("reasoning_type") or []
+    return "B" if not kinds or kinds == ["None"] else "A"
+
+
 def story_of(key: str) -> int:
     return int(key.split("_")[0])
 

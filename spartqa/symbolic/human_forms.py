@@ -15,7 +15,8 @@ import unicodedata
 from typing import Any
 
 # Phrase tables: longer phrases first.
-DETERMINERS = [("tất", "cả", "các"), ("tất", "cả"), ("bất", "kỳ"), ("những",), ("các",), ("một",), ("cái",)]
+DETERMINERS = [("tất", "cả", "các"), ("tất", "cả"), ("bất", "kỳ"), ("những",), ("các",), ("một",), ("cái",),
+               ("hai",)]
 HEADS = [
     (("hình", "tam", "giác"), "triangle"), (("hình", "vuông"), "square"), (("hình", "tròn"), "circle"),
     (("hình", "chữ", "nhật"), "rectangle"), (("tam", "giác"), "triangle"),
@@ -54,7 +55,7 @@ def noun_phrase(tokens: list[str], i: int) -> tuple[dict[str, Any], str, int] | 
     quant = "a"
     for det in DETERMINERS:
         if tuple(tokens[i:i + len(det)]) == det:
-            quant = "all" if det[0] in ("tất", "những", "các") else "a"
+            quant = "all" if det[0] in ("tất", "những", "các") else "a"   # "hai X" (between) is "a"
             i += len(det)
             break
     head = _match(tokens, i, HEADS)
@@ -87,11 +88,23 @@ def noun_phrase(tokens: list[str], i: int) -> tuple[dict[str, Any], str, int] | 
     return desc, quant, i
 
 
-def whole_phrase(tokens: list[str]) -> tuple[dict[str, Any], str] | None:
+def whole_phrase(tokens: list[str], nested: bool = True) -> tuple[dict[str, Any], str] | None:
+    """A complete noun phrase, optionally with one relative clause: "X phía dưới (một) Y"."""
     parsed = noun_phrase(tokens, 0)
-    if parsed is None or parsed[2] != len(tokens):
+    if parsed is None:
         return None
-    return parsed[0], parsed[1]
+    desc, quant, i = parsed
+    if i == len(tokens):
+        return desc, quant
+    if not nested:
+        return None
+    rel = relation(tokens, i)
+    if rel is None or rel[1]:
+        return None
+    target = whole_phrase(tokens[rel[2]:], nested=False)
+    if target is None:
+        return None
+    return {**desc, "rels": [{"rel": rel[0], "quant": target[1], "target": target[0]}]}, quant
 
 
 def relation(tokens: list[str], i: int) -> tuple[list[str], bool, int] | None:
@@ -110,6 +123,9 @@ def relation(tokens: list[str], i: int) -> tuple[list[str], bool, int] | None:
             elif tokens[i:i + 1] and tokens[i] in ("đỉnh", "đầu", "đáy"):
                 side, i = tokens[i], i + 1
             rels += list(CONTACT_SIDES[side]) if side else ["touch"]
+        elif word == "giữa":
+            rels.append("between")
+            i += 1
         elif word in RELATION_WORDS and not (word in ("trên", "dưới", "trái", "phải") and rels and rels[-1] == "touch"):
             rels.append(RELATION_WORDS[word])
             i += 1

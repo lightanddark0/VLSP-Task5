@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+from collections import Counter
 from dataclasses import fields, replace
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,8 @@ from spartqa.voting import vote_samples
 GRID = {"yn_mode": ["closed", "open"], "fr_multi": ["all", "any"], "fb_scope": ["global", "block"],
         "far_chain": [True, False], "cross_block_far": [False, True],
         "forms_mode": ["llm", "rule_first", "rule_plus"], "relax": ["none", "size", "size_color"],
-        "definite": ["any", "all"], "fr_block_share": [False, True], "world_merge": ["none", "merged", "both"]}
+        "definite": ["any", "all"], "fr_block_share": [False, True], "world_merge": ["none", "merged", "both"],
+        "fr_unknown": ["dk", "abstain"], "lenient": [False, True]}
 FIRST_GRID = ("yn_mode", "fr_multi", "fb_scope", "far_chain", "cross_block_far")   # the E3 search
 
 
@@ -72,7 +74,7 @@ def build_solvers(worlds: list[Any], config: LPConfig, calibration: dict | None 
     solvers = []
     for world in candidates:
         try:
-            solvers.append(LPSolver(world_from_json(world, config.rules()), config, calibration))
+            solvers.append(LPSolver(world_from_json(world, config.rules(), config.lenient), config, calibration))
         except (StructureError, KeyError, TypeError):
             continue
     return solvers
@@ -172,6 +174,29 @@ def oof_calibrated(data: dict[str, Any], worlds: dict[int, list[Any]], forms: di
     return records
 
 
+def world_report(worlds: dict[int, list[Any]]) -> tuple[list[tuple[int, int, int, int]], Counter]:
+    """Per story: (story, samples, strictly readable, readable when lenient); and why strict reading fails."""
+    rows, reasons = [], Counter()
+    for story, samples in sorted(worlds.items()):
+        strict = lenient = 0
+        for sample in samples:
+            if sample is None:
+                reasons["không có JSON (bị cắt hoặc không in ra)"] += 1
+                continue
+            try:
+                world_from_json(sample)
+                strict += 1
+            except (StructureError, KeyError, TypeError, AttributeError) as error:
+                reasons[str(error)[:60]] += 1
+            try:
+                world_from_json(sample, lenient=True)
+                lenient += 1
+            except (StructureError, KeyError, TypeError, AttributeError):
+                pass
+        rows.append((story, len(samples), strict, lenient))
+    return rows, reasons
+
+
 def coverage_report(data: dict[str, Any], records: dict[str, dict[str, Any]]) -> dict[str, dict[str, float]]:
     """Per type: questions parsed, answered (not abstained), and accuracy on the answered ones."""
     stats = {task: {"parsed": 0, "answered": 0, "correct": 0} for task in TASKS}
@@ -223,12 +248,25 @@ def main(argv: list[str] | None = None) -> int:
                         help="Answer --input with FR tables learned out of fold (K story folds of --input itself).")
     parser.add_argument("--output", type=Path, help="Write predictions (JSONL) for the --set convention.")
     parser.add_argument("--source", default="LP")
+    parser.add_argument("--world-report", action="store_true",
+                        help="Print how many sampled worlds per story are readable, and why the others fail.")
     args = parser.parse_args(argv)
 
     data = read_json(args.input)
     worlds, forms = read_parses(args.parses)
     config = replace(LPConfig(), **dict(args.set))
     calibration = read_json(args.fr_calibration) if args.fr_calibration else None
+    if args.world_report:
+        rows, reasons = world_report(worlds)
+        weak = [row for row in rows if row[2] < 2]
+        print(f"{len(rows)} stories; {sum(r[1] for r in rows)} sampled worlds; strictly readable "
+              f"{sum(r[2] for r in rows)}, readable when lenient {sum(r[3] for r in rows)}")
+        print(f"Stories with fewer than 2 strictly readable worlds: {len(weak)}")
+        for story, samples, strict, lenient in weak:
+            print(f"  story {story}: {strict}/{samples} strict, {lenient}/{samples} lenient")
+        print("Why strict reading fails:")
+        for reason, count in reasons.most_common(12):
+            print(f"  {count:4d}  {reason}")
     if args.grid:
         keys = [key.strip() for key in args.grid_keys.split(",") if key.strip()]
         unknown = [key for key in keys if key not in GRID]

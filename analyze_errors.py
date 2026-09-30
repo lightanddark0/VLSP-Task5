@@ -111,10 +111,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lp-settings", type=Path, help="JSON with a 'settings' list (e.g. outputs/e4/lp_choice.json).")
     parser.add_argument("--set", type=parse_setting, action="append", default=[], metavar="NAME=VALUE")
     parser.add_argument("--human-yn-dk", choices=("keep", "no"), default="keep")
+    parser.add_argument("--human-fr-dk", choices=("keep", "avoid"), default="keep",
+                        help="avoid: Human FR [7] becomes the relations some source scored.")
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/analysis"))
     args = parser.parse_args(argv)
 
-    options = PostprocessOptions(human_yn_dk=args.human_yn_dk)
+    options = PostprocessOptions(human_yn_dk=args.human_yn_dk, human_fr_dk=args.human_fr_dk)
     setup = load_setup(args.pred_dir, args.splits_dir, args.split, args.branches)
     questions, sources, names = setup["questions"], setup["sources"], setup["names"]
     dataset, fallback = setup["dataset"], setup["fallback"]
@@ -174,6 +176,21 @@ def main(argv: list[str] | None = None) -> int:
                "\"không nguồn nào đúng\" cần ý tưởng mới (hoặc là gold mâu thuẫn với câu chuyện).\n",
                table(["Loại"] + names, [[t] + [rescue[t][n] for n in names] for t in TASKS if t in rescue]),
                "\n(Số câu ensemble sai mà nguồn đó đúng.)\n"]
+
+    # 1b. the two question batches
+    from spartqa.analysis import group_of
+    rows = []
+    for group in ("A", "B"):
+        subset = [(k, q) for k, q in questions if group_of(q) == group]
+        cells = []
+        for task in TASKS:
+            part = [(k, q) for k, q in subset if q["q_type"] == task]
+            cells.append(f"{sum(answer_matches(task, ensemble[k], q['answer']) for k, q in part) / max(len(part), 1):.3f}"
+                         f" ({len(part)})")
+        wrong = sum(not answer_matches(q["q_type"], ensemble[k], q["answer"]) for k, q in subset)
+        rows.append([group, len(subset), *cells, wrong])
+    report += ["## 1b. Theo nhóm câu hỏi (A: có reasoning_type, B: không có — chỉ để phân tích)\n",
+               table(["Nhóm", "Số câu", *TASKS, "Sai"], rows), ""]
 
     # 2. each source alone
     rows = []
