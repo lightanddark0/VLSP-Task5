@@ -45,6 +45,7 @@ run_colab_e3.ipynb        Colab notebook for experiment E3 (branch LP) and its c
 run_colab_e4.ipynb        Colab notebook for E4: LP+ (CPU) and F2C cross-fit, ensembles tuned on 613 Human questions
 run_analysis_e5.ipynb     CPU notebook: error analysis and stacking on the E4 predictions
 run_colab_e6.ipynb        E6: FR DK fix, nested stacking, group A/B scores, LP re-sampling of unreadable worlds
+run_colab_e7.ipynb        E7: extra L-CoT source L2 (Qwen3-30B-A3B-Thinking-2507), three-variant comparison, final submission
 run_colab.ipynb           Colab H100 notebook that runs the whole pipeline
 gpt_experiment.py         API experiment CLI, cache, exports, and configuration
 XLNER.py                  XLNet training/evaluation/prediction CLI
@@ -282,6 +283,15 @@ Result (Human cv, ensembles tuned on train + dev, 613 questions): F+S+L 0.795,
 `forms_mode=rule_plus` and `world_merge=both`; the FR near/far table did not
 help out of fold and is off. Per type with LPX: YN 0.857, FR 0.785, FB 0.922,
 CO 0.819. F2C held-out folds range 0.63-0.79, so 7-story dev scores are noisy.
+
+Public-test scores (Codabench overall rank score, mean of the 8 Human/Auto metrics):
+E4 0.8887, E6 0.8913, **E7 0.8963 (best so far)**. E7 (`run_colab_e7.ipynb`) runs
+L-CoT with a second thinking model on Human train/dev/test (source LCOT2, tolerant
+answer parsing for the 2507 template), compares base / +L2 / L2-replaces-L on the 613
+Human questions and writes the best variant. The 0.8963 file was made with
+`HUMAN_YN_DK_FINAL="no"`; E4, which kept DK, scored Human YN 47/51 against 44/51,
+so the notebook default is now `"keep"` (not yet re-submitted). Human public test
+has only 132 questions, so differences of 1-2 questions are noise.
 
 `ensemble.py` picks, per question type, the best single source or weighted vote
 on dev, applies post-processing, validates the submission structure, and writes
